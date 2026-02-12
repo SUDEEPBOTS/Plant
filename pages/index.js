@@ -269,7 +269,7 @@ export default function PlantPos() {
 
                     {showQr && (
                         <div style={{textAlign:'center', marginBottom:'15px', background:'#fff', padding:'10px', borderRadius:'8px'}}>
-                            <img src="https://files.catbox.moe/cpum4j.png" alt="Pay QR" style={{width:'200px', height:'200px'}} />
+                            <img src="https://files.catbox.moe/jedcoz.png" alt="Pay QR" style={{width:'200px', height:'200px'}} />
                             <div style={{color:'black', fontWeight:'bold', marginTop:'5px'}}>Scan to Pay</div>
                         </div>
                     )}
