@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Head from 'next/head';
 
 export default function PlantPos() {
@@ -8,7 +8,7 @@ export default function PlantPos() {
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [cart, setCart] = useState([]);
-  const [loadingData, setLoadingData] = useState(true); // Default true
+  const [loadingData, setLoadingData] = useState(true); 
   
   // UI States
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -27,15 +27,29 @@ export default function PlantPos() {
   const [newItem, setNewItem] = useState({ name: '', price: '', pricePerBottle: '', stock: '', image: '' });
   const [isEditing, setIsEditing] = useState(null);
 
-  // Initial Load
+  // Audio Ref
+  const audioRef = useRef(null);
+
   useEffect(() => { 
     loadAllData();
   }, []);
 
+  // --- LOADING LOGIC (FIXED) ---
   const loadAllData = async () => {
     setLoadingData(true);
-    await Promise.all([fetchProducts(), fetchOrders()]);
-    setLoadingData(false); // Stop loading after data arrives
+    try {
+        await Promise.all([fetchProducts(), fetchOrders()]);
+    } catch (error) {
+        console.error("Load Error");
+    } finally {
+        setLoadingData(false); // Ye zaroor chalega
+    }
+  };
+
+  // --- SOUND EFFECT ---
+  const playSound = () => {
+      if (navigator.vibrate) navigator.vibrate(50);
+      // Optional: Add a real sound file url if needed
   };
 
   // --- API CALLS ---
@@ -67,22 +81,25 @@ export default function PlantPos() {
           setIsAdminUnlocked(true);
           setAdminPassword('');
       } else {
-          showToast("Wrong Password! ❌", "error");
+          showToast("Galat Password! ❌", "error");
       }
   };
 
   // --- CART LOGIC ---
   const addToCart = (p) => {
-    if (navigator.vibrate) navigator.vibrate(50);
+    playSound();
+    if (p.stock <= 0) { showToast("Out of Stock! ❌", "error"); return; }
+    
     const currentInCart = cart.find(i => i._id === p._id)?.qty || 0;
-    if (currentInCart >= p.stock) { showToast("Stock Khatam! ❌", "error"); return; }
+    if (currentInCart >= p.stock) { showToast("Stock Khatam! ⚠️", "error"); return; }
 
     const exist = cart.find(i => i._id === p._id);
     setCart(exist ? cart.map(i => i._id === p._id ? { ...i, qty: i.qty + 1 } : i) : [...cart, { ...p, qty: 1 }]);
+    showToast(`${p.name} Added!`);
   };
 
   const decreaseQty = (id) => {
-    if (navigator.vibrate) navigator.vibrate(50);
+    playSound();
     const exist = cart.find(i => i._id === id);
     if(exist.qty === 1) setCart(cart.filter(i => i._id !== id));
     else setCart(cart.map(i => i._id === id ? { ...i, qty: i.qty - 1 } : i));
@@ -90,7 +107,7 @@ export default function PlantPos() {
 
   const calculateTotal = () => cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
 
-  // --- REPORTS ---
+  // --- REPORTS & EXPORT ---
   const getCollectionReport = () => {
     let c = 0, o = 0;
     orders.forEach(ord => ord.paymentMode === 'Online' ? o += ord.totalAmount : c += ord.totalAmount);
@@ -101,6 +118,17 @@ export default function PlantPos() {
     const sold = orders.reduce((acc, o) => acc + (o.items.find(i => i.name === p.name)?.qty || 0), 0);
     return { name: p.name, current: p.stock, sold: sold, loaded: p.stock + sold };
   });
+
+  const exportCSV = () => {
+      const report = getDayReport();
+      let csvContent = "data:text/csv;charset=utf-8,Item,Sold,Current Stock\n";
+      report.forEach(r => {
+          csvContent += `${r.name},${r.sold},${r.current}\n`;
+      });
+      const encodedUri = encodeURI(csvContent);
+      window.open(encodedUri);
+      showToast("Report Downloaded! 📥");
+  };
 
   const totalStockValue = products.reduce((acc, p) => acc + (p.price * p.stock), 0);
 
@@ -114,10 +142,11 @@ export default function PlantPos() {
     const billDetails = { shopName, items: cart, totalAmount: total, paymentMode, date: new Date() };
     const tempCart = [...cart];
     
-    // Immediate Redirect
+    // Immediate Redirect (WhatsApp)
     let msg = `*🧾 NEW INVOICE*\n🏪 *${shopName}* (${shopNumber || 'No Num'})\n\n`;
     tempCart.forEach(i => msg += `${i.qty} x ${i.name} = ₹${i.price * i.qty}\n`);
     msg += `\n*💰 TOTAL: ₹${total}*\nMode: ${paymentMode}\nDate: ${new Date().toLocaleDateString()}`;
+    
     window.open(`https://wa.me/917303847666?text=${encodeURIComponent(msg)}`, '_blank');
 
     setCart([]); setShopName(''); setShopNumber(''); setIsSubmitting(false);
@@ -129,36 +158,54 @@ export default function PlantPos() {
         loadAllData();
         showToast("Bill Saved ✅");
     } catch(e) {
-        showToast("Saved Locally (Offline) ⚠️", "success");
+        showToast("Offline Mode ⚠️", "success");
     }
   };
 
-  // --- ADMIN ACTIONS ---
-  const handleImageUpload = async (e) => {
+  // --- IMAGE COMPRESSION & UPLOAD ---
+  const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-        const res = await fetch('https://telegra.ph/upload', { method: 'POST', body: formData });
-        const data = await res.json();
-        if (data && data[0]) setNewItem({ ...newItem, image: 'https://telegra.ph' + data[0].src });
-    } catch (error) { showToast("Image Upload Failed", "error"); }
+
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target.result;
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 500; // Resize to 500px width
+            const scaleSize = MAX_WIDTH / img.width;
+            canvas.width = MAX_WIDTH;
+            canvas.height = img.height * scaleSize;
+
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+            // Compress to JPEG 0.7 quality
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+            setNewItem({ ...newItem, image: dataUrl });
+            showToast("Photo Compressed & Ready! ✅");
+        }
+    }
   };
 
   const handleSaveItem = async () => {
     if(!newItem.name || !newItem.price) return showToast("Name & Price Required", "error");
     
-    const endpoint = isEditing ? '/api/products' : '/api/products';
+    const endpoint = '/api/products';
     const method = isEditing ? 'PUT' : 'POST';
     const body = isEditing ? { id: isEditing, ...newItem } : newItem;
 
-    await fetch(endpoint, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
-    
-    showToast(isEditing ? "Item Updated! ✅" : "Item Added! ✅");
-    setNewItem({ name: '', price: '', pricePerBottle: '', stock: '', image: '' });
-    setIsEditing(null);
-    fetchProducts();
+    try {
+        await fetch(endpoint, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        showToast(isEditing ? "Item Updated! ✅" : "Item Added! ✅");
+        setNewItem({ name: '', price: '', pricePerBottle: '', stock: '', image: '' });
+        setIsEditing(null);
+        loadAllData();
+    } catch(e) {
+        showToast("Save Failed ❌", "error");
+    }
   };
 
   const editItem = (p) => {
@@ -170,16 +217,22 @@ export default function PlantPos() {
   const deleteProduct = async (id) => { 
       if(confirm("Delete this item?")) { 
           await fetch(`/api/products?id=${id}`, { method: 'DELETE' }); 
-          fetchProducts(); 
+          loadAllData(); 
       } 
   };
 
-  // --- RENDER HELPERS ---
+  const handleFactoryReset = async () => {
+    if(confirm("⚠️ RESET ALL DATA?") && prompt("Type 'DELETE'") === 'DELETE') {
+        await fetch('/api/reset', { method: 'DELETE' });
+        setProducts([]); setOrders([]); setCart([]);
+    }
+  };
+
   const filteredProducts = products.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
-  // Styles
+  // --- STYLES ---
   const styles = {
-    container: { background: '#f4f6f8', color: '#000', minHeight: '100vh', paddingBottom: '120px', fontFamily: 'sans-serif' },
+    container: { background: '#f4f6f8', color: '#000', minHeight: '100vh', paddingBottom: '200px', fontFamily: 'sans-serif' },
     header: { padding: '15px', background: '#fff', borderBottom: '1px solid #ddd', textAlign: 'center', color: '#2e7d32', fontSize: '20px', fontWeight: '800', position:'sticky', top:0, zIndex:50, boxShadow:'0 2px 5px rgba(0,0,0,0.05)' },
     input: { width: '100%', padding: '12px', background: '#fff', border: '1px solid #ccc', borderRadius: '8px', marginBottom: '10px', boxSizing: 'border-box' },
     btn: { width: '100%', padding: '14px', background: '#2e7d32', border: 'none', borderRadius: '8px', color: '#fff', fontWeight: 'bold', marginTop: '10px', fontSize:'16px' },
@@ -187,10 +240,12 @@ export default function PlantPos() {
     addBtn: (disabled) => ({ background: disabled ? '#ccc' : '#2e7d32', color: 'white', border: 'none', padding: '8px', width: '100%', borderRadius: '6px', fontWeight: 'bold', marginTop: '10px', cursor: disabled ? 'not-allowed' : 'pointer' }),
     nav: { position: 'fixed', bottom: 0, left: 0, width: '100%', background: '#fff', display: 'flex', borderTop: '1px solid #ddd', zIndex: 100, paddingBottom: '10px', paddingTop: '10px', boxShadow: '0 -2px 10px rgba(0,0,0,0.05)' },
     navBtn: (active) => ({ flex: 1, padding: '5px', background: 'none', border: 'none', color: active ? '#2e7d32' : '#888', fontWeight: 'bold', fontSize: '12px', display:'flex', flexDirection:'column', alignItems:'center' }),
-    skeleton: { background: '#e0e0e0', height: '100px', borderRadius: '8px', width: '100%', animation: 'pulse 1.5s infinite', marginBottom: '10px' },
+    skeleton: { background: '#e0e0e0', height: '140px', borderRadius: '12px', width: '100%', animation: 'pulse 1.5s infinite' },
     loader: { position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'rgba(0,0,0,0.7)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:9999, flexDirection:'column' },
     blurOverlay: { position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'rgba(255,255,255,0.8)', backdropFilter:'blur(5px)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:200 },
-    loginBox: { background:'white', padding:'25px', borderRadius:'15px', boxShadow:'0 10px 25px rgba(0,0,0,0.2)', width:'80%', textAlign:'center' }
+    loginBox: { background:'white', padding:'25px', borderRadius:'15px', boxShadow:'0 10px 25px rgba(0,0,0,0.2)', width:'80%', textAlign:'center' },
+    pill: (active) => ({ padding: '8px 20px', borderRadius: '20px', border: '1px solid #2e7d32', background: active ? '#2e7d32' : 'transparent', color: active ? '#fff' : '#000', fontWeight: 'bold' }),
+    toast: { position: 'fixed', bottom: '90px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '12px 24px', borderRadius: '30px', boxShadow: '0 4px 10px rgba(0,0,0,0.3)', zIndex: 1000, fontWeight: 'bold', animation: 'fadeIn 0.3s', whiteSpace: 'nowrap' }
   };
 
   return (
@@ -204,7 +259,7 @@ export default function PlantPos() {
 
       {isSubmitting && <div style={styles.loader}><div style={{width:'50px', height:'50px', border:'5px solid #fff', borderTop:'5px solid #2e7d32', borderRadius:'50%', animation:'spin 1s linear infinite'}}></div></div>}
       
-      {toast && <div style={{position:'fixed', bottom:'90px', left:'50%', transform:'translateX(-50%)', background:'#333', color:'#fff', padding:'10px 20px', borderRadius:'30px', zIndex:2000}}>{toast.msg}</div>}
+      {toast && <div style={styles.toast}>{toast.msg}</div>}
 
       <div style={styles.header}>🌱 PLANT MANAGER</div>
 
@@ -219,8 +274,8 @@ export default function PlantPos() {
 
           <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px', padding:'15px'}}>
             {loadingData ? (
-                // SKELETON LOADING
-                Array(4).fill(0).map((_, i) => <div key={i} style={styles.card}><div style={styles.skeleton}></div><div style={{...styles.skeleton, height:'20px'}}></div></div>)
+                // SKELETON LOADING (FIXED)
+                Array(6).fill(0).map((_, i) => <div key={i} style={styles.skeleton}></div>)
             ) : filteredProducts.length === 0 ? (
                 <div style={{gridColumn:'span 2', textAlign:'center', color:'#888', padding:'20px'}}>No Items Found 🪴</div>
             ) : (
@@ -230,13 +285,16 @@ export default function PlantPos() {
                     return (
                         <div key={p._id} style={{...styles.card, border: available === 0 ? '2px solid red' : '1px solid #e0e0e0'}}>
                             <div style={{height:'100px', width:'100%', background:'#f5f5f5', borderRadius:'8px', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center'}}>
-                                {p.image ? <img src={p.image} style={{width:'100%', height:'100%', objectFit:'contain'}} /> : <span style={{color:'#ccc'}}>No Img</span>}
+                                {p.image ? <img src={p.image} style={{width:'100%', height:'100%', objectFit:'contain'}} /> : <span style={{color:'#ccc', fontSize:'12px'}}>No Photo</span>}
                             </div>
                             <div style={{marginTop:'8px'}}>
                                 <div style={{fontWeight:'bold', fontSize:'15px'}}>{p.name}</div>
                                 <div style={{fontSize:'13px'}}>Petti: <b>₹{p.price}</b></div>
-                                <div style={{fontSize:'12px', color: available < 5 ? 'red' : '#2e7d32', fontWeight:'bold'}}>
-                                    {available <= 0 ? 'Out of Stock' : `Available: ${available}`}
+                                <div style={{fontSize:'12px', color:'#555', marginTop:'2px'}}>
+                                    Bottle: {p.pricePerBottle > 0 ? <b>₹{p.pricePerBottle}</b> : <span style={{color:'red', fontSize:'10px'}}>NOT SET</span>}
+                                </div>
+                                <div style={{fontSize:'12px', color: available < 5 ? 'red' : '#2e7d32', fontWeight:'bold', marginTop:'5px'}}>
+                                    {available <= 0 ? 'OUT OF STOCK' : `Stock: ${available}`}
                                 </div>
                             </div>
                             <button onClick={() => addToCart(p)} disabled={available <= 0} style={styles.addBtn(available <= 0)}>
@@ -247,8 +305,6 @@ export default function PlantPos() {
                 })
             )}
           </div>
-          
-          <div style={{height:'350px'}}></div>
 
           {cart.length > 0 && (
             <div style={{padding:'15px', background: '#fff', borderTop: '2px solid #2e7d32', position:'fixed', bottom:'60px', left:0, width:'100%', boxSizing:'border-box', boxShadow:'0 -5px 15px rgba(0,0,0,0.1)', zIndex: 90}}>
@@ -269,10 +325,11 @@ export default function PlantPos() {
               <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', borderTop:'1px solid #ccc', paddingTop:'10px', marginBottom:'10px'}}>
                   <div style={{fontSize:'18px', fontWeight:'bold'}}>Total: ₹{calculateTotal()}</div>
                   <div style={{display:'flex', gap:'10px'}}>
-                    <button onClick={() => { setPaymentMode('Cash'); setShowQr(false); }} style={{padding:'8px 15px', border:'1px solid #2e7d32', borderRadius:'20px', background: paymentMode==='Cash'?'#2e7d32':'transparent', color: paymentMode==='Cash'?'#fff':'#000'}}>💵</button>
-                    <button onClick={() => { setPaymentMode('Online'); setShowQr(true); }} style={{padding:'8px 15px', border:'1px solid #2e7d32', borderRadius:'20px', background: paymentMode==='Online'?'#2e7d32':'transparent', color: paymentMode==='Online'?'#fff':'#000'}}>📱</button>
+                    <button onClick={() => { setPaymentMode('Cash'); setShowQr(false); }} style={styles.pill(paymentMode === 'Cash')}>💵</button>
+                    <button onClick={() => { setPaymentMode('Online'); setShowQr(true); }} style={styles.pill(paymentMode === 'Online')}>📱</button>
                   </div>
               </div>
+              {showQr && <div style={{textAlign:'center', marginBottom:'10px'}}><img src="https://files.catbox.moe/jedcoz.png" style={{width:'120px'}} /></div>}
               <button onClick={handleBillSubmit} style={styles.btn}>✅ SUBMIT ORDER</button>
             </div>
           )}
@@ -311,21 +368,12 @@ export default function PlantPos() {
                 </div>
             ) : (
                 <>
-                    {/* COLLECTION REPORT */}
+                    {/* REPORTS */}
                     <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
-                        <h3 style={{marginTop:0, color:'#2e7d32'}}>💰 COLLECTION</h3>
-                        <div style={{display:'flex', justifyContent:'space-between'}}><span>💵 Cash:</span><span style={{fontWeight:'bold'}}>₹{getCollectionReport().cash}</span></div>
-                        <div style={{display:'flex', justifyContent:'space-between'}}><span>📱 Online:</span><span style={{fontWeight:'bold'}}>₹{getCollectionReport().online}</span></div>
-                        <div style={{borderTop:`1px solid #eee`, paddingTop:'5px', marginTop:'5px', fontWeight:'bold', display:'flex', justifyContent:'space-between'}}><span>TOTAL:</span><span>₹{getCollectionReport().total}</span></div>
-                    </div>
-
-                    {/* STOCK REPORT */}
-                    <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
-                        <h3 style={{marginTop:0, color:'#2196f3'}}>🚚 STOCK REPORT</h3>
-                        <table style={{width:'100%', fontSize:'12px', textAlign:'left'}}>
-                            <thead><tr style={{color:'#888'}}><th>ITEM</th><th>SOLD</th><th>BAL</th></tr></thead>
-                            <tbody>{getDayReport().map((r,i) => <tr key={i}><td>{r.name}</td><td style={{color:'#ff3d00'}}>{r.sold}</td><td style={{color:'#2e7d32', fontWeight:'bold'}}>{r.current}</td></tr>)}</tbody>
-                        </table>
+                        <h3 style={{marginTop:0, color:'#2e7d32'}}>💰 REPORT</h3>
+                        <div style={{display:'flex', justifyContent:'space-between'}}><span>Total Sell:</span><span style={{fontWeight:'bold'}}>₹{getCollectionReport().total}</span></div>
+                        <div style={{display:'flex', justifyContent:'space-between', marginTop:'5px'}}><span>Stock Value:</span><span style={{fontWeight:'bold'}}>₹{totalStockValue}</span></div>
+                        <button onClick={exportCSV} style={{...styles.btn, background:'#333', fontSize:'12px', padding:'8px', marginTop:'10px'}}>📥 Download Excel</button>
                     </div>
 
                     <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
@@ -336,7 +384,12 @@ export default function PlantPos() {
                             <input type="number" placeholder="Bottle MRP" style={styles.input} value={newItem.pricePerBottle} onChange={e => setNewItem({...newItem, pricePerBottle: e.target.value})} />
                         </div>
                         <input type="number" placeholder="Stock Qty" style={styles.input} value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} />
-                        <input type="file" accept="image/*" onChange={handleImageUpload} style={{marginBottom:'10px'}} />
+                        
+                        {/* PHOTO UPLOAD (COMPRESSED) */}
+                        <div style={{marginBottom:'10px'}}>
+                            <label style={{fontSize:'12px', color:'#666'}}>Item Photo</label>
+                            <input type="file" accept="image/*" onChange={handleImageUpload} style={{marginTop:'5px'}} />
+                        </div>
                         
                         {isEditing ? (
                             <div style={{display:'flex', gap:'10px'}}>
@@ -351,9 +404,12 @@ export default function PlantPos() {
                     <h3 style={{marginTop:'30px'}}>Inventory</h3>
                     {products.map(p => (
                         <div key={p._id} style={{display:'flex', justifyContent:'space-between', borderBottom: '1px solid #eee', padding:'10px', background:'white'}}>
-                            <div>
-                                <div style={{fontWeight:'bold'}}>{p.name}</div>
-                                <div style={{fontSize:'12px', color:'#666'}}>Stock: {p.stock} | Price: ₹{p.price}</div>
+                            <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+                                {p.image && <img src={p.image} style={{width:'40px', height:'40px', borderRadius:'4px', objectFit:'cover'}} />}
+                                <div>
+                                    <div style={{fontWeight:'bold'}}>{p.name}</div>
+                                    <div style={{fontSize:'12px', color:'#666'}}>Stk: {p.stock} | ₹{p.price}</div>
+                                </div>
                             </div>
                             <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
                                 <button onClick={() => editItem(p)} style={{color:'#2196f3', border:'1px solid #2196f3', background:'none', padding:'2px 8px', borderRadius:'4px', fontSize:'12px', fontWeight:'bold'}}>EDIT</button>
@@ -361,6 +417,8 @@ export default function PlantPos() {
                             </div>
                         </div>
                     ))}
+                    
+                    <button onClick={handleFactoryReset} style={{...styles.btn, background:'#ff5252', marginTop:'30px'}}>⚠️ RESET ALL DATA</button>
                 </>
             )}
         </div>
@@ -377,4 +435,4 @@ export default function PlantPos() {
       </div>
     </div>
   );
-                      }
+}
