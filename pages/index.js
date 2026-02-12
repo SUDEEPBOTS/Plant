@@ -388,10 +388,44 @@ export default function PlantPos() {
             <input placeholder="Price" type="number" style={styles.input} value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} />
             <input placeholder="Stock" type="number" style={styles.input} value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} />
             
-            {/* PHOTO UPLOAD */}
+                        {/* PHOTO UPLOAD */}
             <div style={{marginBottom:'10px'}}>
                 <label style={{display:'block', marginBottom:'5px', color:'#888', fontSize:'12px'}}>Item Photo (Optional)</label>
                 <input type="file" accept="image/*" onChange={handleImageUpload} style={{color: isDark ? '#fff' : '#000'}} />
             </div>
 
-            <button o
+            <button onClick={addProduct} style={styles.btn}>ADD ITEM</button>
+
+             <h3 style={{marginTop:'30px'}}>Stock List</h3>
+            {products.map(p => (
+                <div key={p._id} style={{display:'flex', alignItems:'center', justifyContent:'space-between', borderBottom: styles.header.borderBottom, padding:'10px'}}>
+                    <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+                        {p.image && <img src={p.image} style={{width:'40px', height:'40px', borderRadius:'4px', objectFit:'cover'}} />}
+                        <span>{p.name} ({p.stock})</span>
+                    </div>
+                    <button onClick={() => deleteProduct(p._id)} style={{color:'red', background:'none', border:'none'}}>Del</button>
+                </div>
+            ))}
+
+            {/* FACTORY RESET BUTTON */}
+            <button onClick={handleFactoryReset} style={styles.dangerBtn}>
+                ⚠️ RESET ALL DATA (ALL CLEAR)
+            </button>
+        </div>
+      )}
+
+      {/* NAVIGATION */}
+      <div style={styles.nav}>
+        <button style={styles.navBtn(activeTab === 'billing')} onClick={() => setActiveTab('billing')}>
+            <span style={{fontSize:'18px'}}>🛒</span> BILLING
+        </button>
+        <button style={styles.navBtn(activeTab === 'history')} onClick={() => setActiveTab('history')}>
+            <span style={{fontSize:'18px'}}>📄</span> HISTORY
+        </button>
+        <button style={styles.navBtn(activeTab === 'admin')} onClick={() => setActiveTab('admin')}>
+            <span style={{fontSize:'18px'}}>⚙️</span> ADMIN
+        </button>
+      </div>
+    </div>
+  );
+              }
