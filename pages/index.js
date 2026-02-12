@@ -103,7 +103,7 @@ export default function PlantPos() {
         msg += `\n*💰 TOTAL: ₹${total}*\nMode: ${paymentMode}\nDate: ${new Date().toLocaleDateString()}`;
         
         // Open WhatsApp IMMEDIATELY (Don't wait for DB if net is slow)
-        window.open(`https://wa.me/917303847666?text=${encodeURIComponent(msg)}`, '_blank');
+        window.open(`https://wa.me/917412896405?text=${encodeURIComponent(msg)}`, '_blank');
 
         // Background Database Save
         await fetch('/api/orders', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(billDetails) });
