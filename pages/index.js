@@ -70,7 +70,7 @@ export default function PlantPos() {
   // --- CART ACTIONS ---
   const addToCart = (p) => {
     if (navigator.vibrate) navigator.vibrate(50);
-    if (p.stock <= 0) { showToast("Stock Khatam! ❌", "error"); return; }
+    // Stock check removed temporarily to prevent blocking sales
     
     const exist = cart.find(i => i._id === p._id);
     setCart(exist ? cart.map(i => i._id === p._id ? { ...i, qty: i.qty + 1 } : i) : [...cart, { ...p, qty: 1 }]);
@@ -86,7 +86,7 @@ export default function PlantPos() {
 
   const calculateTotal = () => cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
 
-  // --- BILL SUBMIT (FIXED) ---
+  // --- BILL SUBMIT (FIXED LOADER ISSUE) ---
   const handleBillSubmit = async () => {
     if(cart.length === 0 || !shopName) { showToast("Dukan Name daal bhai!", "error"); return; }
     
@@ -96,26 +96,28 @@ export default function PlantPos() {
     const billDetails = { shopName, items: cart, totalAmount: total, paymentMode };
 
     try {
-        // 1. Try to Save to Database
-        await fetch('/api/orders', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(billDetails) });
-        await fetch('/api/products', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ items: cart }) });
-        
-        showToast("Bill Saved Online! ✅");
-    } catch(e) {
-        showToast("Offline Mode: Sending WhatsApp", "error");
-    } finally {
-        // 2. THIS WILL RUN ALWAYS (Chahe Error aaye ya nahi)
-        let msg = `*🧾 INVOICE*\n🏪 *${shopName}* (${shopNumber})\n\n`;
+        // WhatsApp Message Prepare
+        let msg = `*🧾 NEW BILL*\n`;
+        msg += `🏪 *${shopName}* (${shopNumber || 'No Num'})\n\n`;
         cart.forEach(i => msg += `${i.qty} x ${i.name} = ₹${i.price * i.qty}\n`);
         msg += `\n*💰 TOTAL: ₹${total}*\nMode: ${paymentMode}\nDate: ${new Date().toLocaleDateString()}`;
         
-        // Open WhatsApp
+        // Open WhatsApp IMMEDIATELY (Don't wait for DB if net is slow)
         window.open(`https://wa.me/917303847666?text=${encodeURIComponent(msg)}`, '_blank');
 
-        // Cleanup
-        setIsSubmitting(false); // Loader Stop
+        // Background Database Save
+        await fetch('/api/orders', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(billDetails) });
+        await fetch('/api/products', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ items: cart }) });
+
+        // Reset UI
         setCart([]); setShopName(''); setShopNumber(''); setPaymentMode('Cash'); setShowQr(false);
         fetchProducts(); fetchOrders();
+        showToast("Bill Saved! ✅");
+
+    } catch(e) {
+        showToast("Bill Sent (Offline) ⚠️", "success");
+    } finally {
+        setIsSubmitting(false); // Loader Stop Always
     }
   };
 
@@ -216,7 +218,7 @@ export default function PlantPos() {
           </div>
           
           {/* HUGE SPACER TO FIX HIDDEN ITEMS */}
-          <div style={{height:'350px'}}></div>
+          <div style={{height:'400px'}}></div>
 
           {cart.length > 0 && (
             <div style={{padding:'15px', background: '#fff', borderTop: '2px solid #2e7d32', position:'fixed', bottom:'60px', left:0, width:'100%', boxSizing:'border-box', boxShadow:'0 -5px 15px rgba(0,0,0,0.1)', zIndex: 90}}>
@@ -319,5 +321,4 @@ export default function PlantPos() {
       </div>
     </div>
   );
-        }
-                      
+}
