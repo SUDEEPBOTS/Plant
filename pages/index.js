@@ -8,7 +8,7 @@ export default function PlantPos() {
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [cart, setCart] = useState([]);
-  const [loadingData, setLoadingData] = useState(true); // For Skeleton
+  const [loadingData, setLoadingData] = useState(true); // Default true
   
   // UI States
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -25,7 +25,7 @@ export default function PlantPos() {
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [newItem, setNewItem] = useState({ name: '', price: '', pricePerBottle: '', stock: '', image: '' });
-  const [isEditing, setIsEditing] = useState(null); // ID of item being edited
+  const [isEditing, setIsEditing] = useState(null);
 
   // Initial Load
   useEffect(() => { 
@@ -35,7 +35,7 @@ export default function PlantPos() {
   const loadAllData = async () => {
     setLoadingData(true);
     await Promise.all([fetchProducts(), fetchOrders()]);
-    setLoadingData(false);
+    setLoadingData(false); // Stop loading after data arrives
   };
 
   // --- API CALLS ---
@@ -51,7 +51,7 @@ export default function PlantPos() {
     try {
         const res = await fetch('/api/orders');
         const data = await res.json();
-        if(data.success) setOrders(data.data.reverse()); // Show latest first
+        if(data.success) setOrders(data.data.reverse());
     } catch(e) { console.error("Err Order"); }
   };
 
@@ -74,13 +74,8 @@ export default function PlantPos() {
   // --- CART LOGIC ---
   const addToCart = (p) => {
     if (navigator.vibrate) navigator.vibrate(50);
-    
-    // Check Actual Stock availability
     const currentInCart = cart.find(i => i._id === p._id)?.qty || 0;
-    if (currentInCart >= p.stock) { 
-        showToast("Stock Not Available! ❌", "error"); 
-        return; 
-    }
+    if (currentInCart >= p.stock) { showToast("Stock Khatam! ❌", "error"); return; }
 
     const exist = cart.find(i => i._id === p._id);
     setCart(exist ? cart.map(i => i._id === p._id ? { ...i, qty: i.qty + 1 } : i) : [...cart, { ...p, qty: 1 }]);
@@ -95,6 +90,20 @@ export default function PlantPos() {
 
   const calculateTotal = () => cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
 
+  // --- REPORTS ---
+  const getCollectionReport = () => {
+    let c = 0, o = 0;
+    orders.forEach(ord => ord.paymentMode === 'Online' ? o += ord.totalAmount : c += ord.totalAmount);
+    return { cash: c, online: o, total: c + o };
+  };
+
+  const getDayReport = () => products.map(p => {
+    const sold = orders.reduce((acc, o) => acc + (o.items.find(i => i.name === p.name)?.qty || 0), 0);
+    return { name: p.name, current: p.stock, sold: sold, loaded: p.stock + sold };
+  });
+
+  const totalStockValue = products.reduce((acc, p) => acc + (p.price * p.stock), 0);
+
   // --- BILL SUBMIT ---
   const handleBillSubmit = async () => {
     if(cart.length === 0 || !shopName) { showToast("Shop Name Required!", "error"); return; }
@@ -103,25 +112,21 @@ export default function PlantPos() {
 
     const total = calculateTotal();
     const billDetails = { shopName, items: cart, totalAmount: total, paymentMode, date: new Date() };
-
-    // Update Local State immediately for speed
     const tempCart = [...cart];
-    setCart([]); 
-    setShopName(''); 
-    setShopNumber('');
-    setIsSubmitting(false); // Stop loading immediately so user isn't stuck
-
-    // WhatsApp Redirect
+    
+    // Immediate Redirect
     let msg = `*🧾 NEW INVOICE*\n🏪 *${shopName}* (${shopNumber || 'No Num'})\n\n`;
     tempCart.forEach(i => msg += `${i.qty} x ${i.name} = ₹${i.price * i.qty}\n`);
     msg += `\n*💰 TOTAL: ₹${total}*\nMode: ${paymentMode}\nDate: ${new Date().toLocaleDateString()}`;
     window.open(`https://wa.me/917303847666?text=${encodeURIComponent(msg)}`, '_blank');
 
+    setCart([]); setShopName(''); setShopNumber(''); setIsSubmitting(false);
+
     // Background Sync
     try {
         await fetch('/api/orders', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(billDetails) });
         await fetch('/api/products', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ items: tempCart }) });
-        loadAllData(); // Refresh Data
+        loadAllData();
         showToast("Bill Saved ✅");
     } catch(e) {
         showToast("Saved Locally (Offline) ⚠️", "success");
@@ -144,24 +149,15 @@ export default function PlantPos() {
   const handleSaveItem = async () => {
     if(!newItem.name || !newItem.price) return showToast("Name & Price Required", "error");
     
-    if(isEditing) {
-        // UPDATE ITEM
-        await fetch('/api/products', { 
-            method: 'PUT', headers: {'Content-Type':'application/json'}, 
-            body: JSON.stringify({ id: isEditing, ...newItem }) 
-        });
-        showToast("Item Updated! ✅");
-        setIsEditing(null);
-    } else {
-        // ADD NEW ITEM
-        await fetch('/api/products', { 
-            method: 'POST', headers: {'Content-Type':'application/json'}, 
-            body: JSON.stringify(newItem) 
-        });
-        showToast("Item Added! ✅");
-    }
+    const endpoint = isEditing ? '/api/products' : '/api/products';
+    const method = isEditing ? 'PUT' : 'POST';
+    const body = isEditing ? { id: isEditing, ...newItem } : newItem;
+
+    await fetch(endpoint, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
     
+    showToast(isEditing ? "Item Updated! ✅" : "Item Added! ✅");
     setNewItem({ name: '', price: '', pricePerBottle: '', stock: '', image: '' });
+    setIsEditing(null);
     fetchProducts();
   };
 
@@ -191,7 +187,7 @@ export default function PlantPos() {
     addBtn: (disabled) => ({ background: disabled ? '#ccc' : '#2e7d32', color: 'white', border: 'none', padding: '8px', width: '100%', borderRadius: '6px', fontWeight: 'bold', marginTop: '10px', cursor: disabled ? 'not-allowed' : 'pointer' }),
     nav: { position: 'fixed', bottom: 0, left: 0, width: '100%', background: '#fff', display: 'flex', borderTop: '1px solid #ddd', zIndex: 100, paddingBottom: '10px', paddingTop: '10px', boxShadow: '0 -2px 10px rgba(0,0,0,0.05)' },
     navBtn: (active) => ({ flex: 1, padding: '5px', background: 'none', border: 'none', color: active ? '#2e7d32' : '#888', fontWeight: 'bold', fontSize: '12px', display:'flex', flexDirection:'column', alignItems:'center' }),
-    skeleton: { background: '#e0e0e0', height: '100px', borderRadius: '8px', width: '100%', animation: 'pulse 1.5s infinite' },
+    skeleton: { background: '#e0e0e0', height: '100px', borderRadius: '8px', width: '100%', animation: 'pulse 1.5s infinite', marginBottom: '10px' },
     loader: { position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'rgba(0,0,0,0.7)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:9999, flexDirection:'column' },
     blurOverlay: { position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'rgba(255,255,255,0.8)', backdropFilter:'blur(5px)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:200 },
     loginBox: { background:'white', padding:'25px', borderRadius:'15px', boxShadow:'0 10px 25px rgba(0,0,0,0.2)', width:'80%', textAlign:'center' }
@@ -224,7 +220,7 @@ export default function PlantPos() {
           <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px', padding:'15px'}}>
             {loadingData ? (
                 // SKELETON LOADING
-                Array(4).fill(0).map((_, i) => <div key={i} style={styles.card}><div style={styles.skeleton}></div><div style={{...styles.skeleton, height:'20px', marginTop:'10px'}}></div></div>)
+                Array(4).fill(0).map((_, i) => <div key={i} style={styles.card}><div style={styles.skeleton}></div><div style={{...styles.skeleton, height:'20px'}}></div></div>)
             ) : filteredProducts.length === 0 ? (
                 <div style={{gridColumn:'span 2', textAlign:'center', color:'#888', padding:'20px'}}>No Items Found 🪴</div>
             ) : (
@@ -261,7 +257,7 @@ export default function PlantPos() {
                       <tbody>{cart.map((item, i) => (
                           <tr key={i} style={{borderBottom:'1px solid #eee'}}>
                               <td style={{padding:'5px'}}>{item.name}</td>
-                              <td style={{padding:'5px'}}>x{item.qty}</td>
+                              <td style={{padding:'5px', fontWeight:'bold'}}>x{item.qty}</td>
                               <td style={{padding:'5px', textAlign:'right'}}>₹{item.price * item.qty}</td>
                               <td style={{width:'30px', textAlign:'right'}}>
                                   <button onClick={() => decreaseQty(item._id)} style={{background:'#ff5252', color:'white', border:'none', borderRadius:'50%', width:'24px', height:'24px', fontWeight:'bold', cursor:'pointer'}}>-</button>
@@ -277,7 +273,6 @@ export default function PlantPos() {
                     <button onClick={() => { setPaymentMode('Online'); setShowQr(true); }} style={{padding:'8px 15px', border:'1px solid #2e7d32', borderRadius:'20px', background: paymentMode==='Online'?'#2e7d32':'transparent', color: paymentMode==='Online'?'#fff':'#000'}}>📱</button>
                   </div>
               </div>
-              {showQr && <div style={{textAlign:'center', marginBottom:'10px'}}><img src="https://files.catbox.moe/jedcoz.png" style={{width:'120px'}} /></div>}
               <button onClick={handleBillSubmit} style={styles.btn}>✅ SUBMIT ORDER</button>
             </div>
           )}
@@ -316,6 +311,23 @@ export default function PlantPos() {
                 </div>
             ) : (
                 <>
+                    {/* COLLECTION REPORT */}
+                    <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
+                        <h3 style={{marginTop:0, color:'#2e7d32'}}>💰 COLLECTION</h3>
+                        <div style={{display:'flex', justifyContent:'space-between'}}><span>💵 Cash:</span><span style={{fontWeight:'bold'}}>₹{getCollectionReport().cash}</span></div>
+                        <div style={{display:'flex', justifyContent:'space-between'}}><span>📱 Online:</span><span style={{fontWeight:'bold'}}>₹{getCollectionReport().online}</span></div>
+                        <div style={{borderTop:`1px solid #eee`, paddingTop:'5px', marginTop:'5px', fontWeight:'bold', display:'flex', justifyContent:'space-between'}}><span>TOTAL:</span><span>₹{getCollectionReport().total}</span></div>
+                    </div>
+
+                    {/* STOCK REPORT */}
+                    <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
+                        <h3 style={{marginTop:0, color:'#2196f3'}}>🚚 STOCK REPORT</h3>
+                        <table style={{width:'100%', fontSize:'12px', textAlign:'left'}}>
+                            <thead><tr style={{color:'#888'}}><th>ITEM</th><th>SOLD</th><th>BAL</th></tr></thead>
+                            <tbody>{getDayReport().map((r,i) => <tr key={i}><td>{r.name}</td><td style={{color:'#ff3d00'}}>{r.sold}</td><td style={{color:'#2e7d32', fontWeight:'bold'}}>{r.current}</td></tr>)}</tbody>
+                        </table>
+                    </div>
+
                     <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
                         <h3 style={{marginTop:0, color:'#2196f3'}}>{isEditing ? '✏️ EDIT ITEM' : '📝 ADD NEW ITEM'}</h3>
                         <input placeholder="Item Name" style={styles.input} value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} />
@@ -365,4 +377,4 @@ export default function PlantPos() {
       </div>
     </div>
   );
-}
+                      }
