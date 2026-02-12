@@ -10,6 +10,9 @@ export default function PlantPos() {
   const [aiPrompt, setAiPrompt] = useState('');
   const [shopName, setShopName] = useState('');
   
+  // Theme State (Dark default)
+  const [theme, setTheme] = useState('dark'); 
+
   // Payment & QR States
   const [paymentMode, setPaymentMode] = useState('Cash'); 
   const [showQr, setShowQr] = useState(false);
@@ -25,13 +28,16 @@ export default function PlantPos() {
     fetchProducts();
     fetchOrders();
 
-    // PWA Install Prompt Listener
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
       setShowInstallBtn(true);
     });
   }, []);
+
+  const toggleTheme = () => {
+    setTheme(theme === 'dark' ? 'light' : 'dark');
+  };
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -45,6 +51,28 @@ export default function PlantPos() {
     const res = await fetch('/api/orders');
     const data = await res.json();
     if(data.success) setOrders(data.data);
+  };
+
+  // --- FACTORY RESET (ALL CLEAR) ---
+  const handleFactoryReset = async () => {
+    const confirm1 = confirm("⚠️ DANGER: Sab kuch delete ho jayega (Products, History, Stock).");
+    if(!confirm1) return;
+    
+    const confirm2 = confirm("Pakka? Wapas nahi aayega data!");
+    if(!confirm2) return;
+
+    const userInput = prompt("Type 'DELETE' to confirm:");
+    if(userInput !== 'DELETE') { alert("Reset Cancelled"); return; }
+
+    setLoading(true);
+    await fetch('/api/reset', { method: 'DELETE' });
+    
+    // Clear Local State
+    setProducts([]);
+    setOrders([]);
+    setCart([]);
+    alert("System Format Complete! 🧹");
+    setLoading(false);
   };
 
   // --- IMAGE UPLOAD LOGIC ---
@@ -179,18 +207,20 @@ export default function PlantPos() {
     if(confirm("Delete?")) { await fetch(`/api/products?id=${id}`, { method: 'DELETE' }); fetchProducts(); }
   }
 
-  // Styles
+  // --- DYNAMIC STYLES (THEME) ---
+  const isDark = theme === 'dark';
   const styles = {
-    container: { background: '#0a0a0a', color: '#fff', minHeight: '100vh', fontFamily: 'sans-serif', paddingBottom: '80px' },
-    header: { padding: '15px', borderBottom: '1px solid #333', textAlign: 'center', color: '#4caf50', fontSize: '24px', fontWeight: 'bold' },
-    nav: { position: 'fixed', bottom: 0, width: '100%', background: '#111', display: 'flex', borderTop: '1px solid #333', zIndex: 100 },
-    navBtn: (active) => ({ flex: 1, padding: '15px', background: 'none', border: 'none', color: active ? '#4caf50' : '#666', fontWeight: 'bold', fontSize:'12px', display: 'flex', flexDirection: 'column', alignItems: 'center' }),
+    container: { background: isDark ? '#0a0a0a' : '#f0f2f5', color: isDark ? '#fff' : '#000', minHeight: '100vh', fontFamily: 'sans-serif', paddingBottom: '80px', transition: '0.3s' },
+    header: { padding: '15px', borderBottom: `1px solid ${isDark ? '#333' : '#ddd'}`, textAlign: 'center', color: '#4caf50', fontSize: '24px', fontWeight: 'bold', display:'flex', justifyContent:'space-between', alignItems:'center', background: isDark ? '#0a0a0a' : '#fff' },
+    nav: { position: 'fixed', bottom: 0, width: '100%', background: isDark ? '#111' : '#fff', display: 'flex', borderTop: `1px solid ${isDark ? '#333' : '#ddd'}`, zIndex: 100, boxShadow: '0 -2px 10px rgba(0,0,0,0.1)' },
+    navBtn: (active) => ({ flex: 1, padding: '10px', background: 'none', border: 'none', color: active ? '#4caf50' : (isDark ? '#666' : '#999'), fontWeight: 'bold', fontSize:'12px', display: 'flex', flexDirection: 'column', alignItems: 'center' }),
     grid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', padding: '10px' },
-    card: { background: '#1a1a1a', padding: '10px', borderRadius: '8px', border: '1px solid #333', textAlign: 'center', position: 'relative' },
-    btn: { width: '100%', padding: '12px', background: '#4caf50', border: 'none', borderRadius: '4px', color: '#000', fontWeight: 'bold', marginTop: '5px' },
-    input: { width: '100%', padding: '10px', background: '#000', border: '1px solid #333', color: '#fff', borderRadius: '4px', marginBottom: '10px', boxSizing: 'border-box' },
-    pill: (active) => ({ padding: '8px 15px', borderRadius: '20px', border: '1px solid #4caf50', background: active ? '#4caf50' : 'transparent', color: active ? '#000' : '#fff', cursor:'pointer', fontSize:'14px' }),
-    installBtn: { position: 'fixed', top: '15px', right: '15px', background: '#fff', color: '#000', border: 'none', padding: '5px 12px', borderRadius: '20px', fontWeight: 'bold', zIndex: 200, cursor: 'pointer', fontSize: '12px' }
+    card: { background: isDark ? '#1a1a1a' : '#fff', padding: '10px', borderRadius: '8px', border: `1px solid ${isDark ? '#333' : '#e0e0e0'}`, textAlign: 'center', position: 'relative', boxShadow: isDark ? 'none' : '0 2px 5px rgba(0,0,0,0.05)' },
+    btn: { width: '100%', padding: '12px', background: '#4caf50', border: 'none', borderRadius: '4px', color: '#fff', fontWeight: 'bold', marginTop: '5px', cursor: 'pointer' },
+    input: { width: '100%', padding: '12px', background: isDark ? '#000' : '#fff', border: `1px solid ${isDark ? '#333' : '#ccc'}`, color: isDark ? '#fff' : '#000', borderRadius: '4px', marginBottom: '10px', boxSizing: 'border-box' },
+    pill: (active) => ({ padding: '8px 15px', borderRadius: '20px', border: '1px solid #4caf50', background: active ? '#4caf50' : 'transparent', color: active ? '#fff' : (isDark ? '#fff' : '#000'), cursor:'pointer', fontSize:'14px' }),
+    installBtn: { position: 'fixed', top: '60px', right: '15px', background: '#4caf50', color: '#fff', border: 'none', padding: '5px 12px', borderRadius: '20px', fontWeight: 'bold', zIndex: 90, cursor: 'pointer', fontSize: '12px', boxShadow: '0 2px 5px rgba(0,0,0,0.2)' },
+    dangerBtn: { width: '100%', padding: '15px', background: '#ff3d00', border: 'none', borderRadius: '4px', color: '#fff', fontWeight: 'bold', marginTop: '30px', cursor: 'pointer' }
   };
 
   const collection = getCollectionReport();
@@ -200,20 +230,28 @@ export default function PlantPos() {
       <Head>
         <title>PLANT POS</title>
         <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#0a0a0a" />
+        <meta name="theme-color" content={isDark ? "#0a0a0a" : "#f0f2f5"} />
+        {/* ZOOM FIX META TAG */}
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
       </Head>
 
-      {/* Install Button (Only shows if app is not installed) */}
+      {/* Install Button */}
       {showInstallBtn && (
         <button style={styles.installBtn} onClick={installApp}>⬇ Install App</button>
       )}
 
-      <div style={styles.header}>PLANT MANAGER {loading && '...'}</div>
+      {/* HEADER WITH THEME TOGGLE */}
+      <div style={styles.header}>
+        <span>PLANT MANAGER {loading && '...'}</span>
+        <button onClick={toggleTheme} style={{background:'none', border:'none', fontSize:'20px', cursor:'pointer'}}>
+            {isDark ? '☀️' : '🌙'}
+        </button>
+      </div>
 
       {/* BILLING TAB */}
       {activeTab === 'billing' && (
         <>
-            <div style={{padding:'10px', background:'#111', borderBottom:'1px solid #333'}}>
+            <div style={{padding:'10px', background: isDark ? '#111' : '#fff', borderBottom: styles.header.borderBottom}}>
                 <input style={{...styles.input, border:'1px solid #4caf50'}} placeholder="Dukan Name (e.g. Raju Bhai)" value={shopName} onChange={e => setShopName(e.target.value)} />
                 <div style={{display:'flex', gap:'10px'}}>
                     <input style={{...styles.input, marginBottom:0}} placeholder="AI: '2 coke'" value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} />
@@ -230,7 +268,7 @@ export default function PlantPos() {
                     {p.image ? (
                         <img src={p.image} alt={p.name} style={{width:'100%', height:'100px', objectFit:'cover', borderRadius:'4px', marginBottom:'5px'}} />
                     ) : (
-                        <div style={{width:'100%', height:'80px', background:'#222', borderRadius:'4px', marginBottom:'5px', display:'flex', alignItems:'center', justifyContent:'center', color:'#555'}}>No Photo</div>
+                        <div style={{width:'100%', height:'80px', background: isDark ? '#222' : '#eee', borderRadius:'4px', marginBottom:'5px', display:'flex', alignItems:'center', justifyContent:'center', color:'#555'}}>No Photo</div>
                     )}
 
                     <div style={{fontWeight:'bold', margin:'5px 0', fontSize:'14px'}}>{p.name}</div>
@@ -241,9 +279,9 @@ export default function PlantPos() {
 
             {/* LIVE BILL */}
             {cart.length > 0 && (
-                <div style={{padding:'15px', background:'#1a1a1a', borderTop:'1px solid #333'}}>
+                <div style={{padding:'15px', background: isDark ? '#1a1a1a' : '#fff', borderTop: styles.header.borderBottom}}>
                     
-                    <div id="invoice-area" style={{background:'#fff', padding:'10px', color:'black', borderRadius:'5px', marginBottom:'15px'}}>
+                    <div id="invoice-area" style={{background:'#fff', padding:'10px', color:'black', borderRadius:'5px', marginBottom:'15px', border:'1px solid #ccc'}}>
                         <h3 style={{borderBottom:'1px solid #000', margin:'0 0 10px 0', display:'flex', justifyContent:'space-between'}}>
                             <span>INVOICE</span> <span>{new Date().toLocaleDateString()}</span>
                         </h3>
@@ -261,21 +299,22 @@ export default function PlantPos() {
                         <div style={{marginTop: '10px', fontSize: '12px', borderTop: '1px solid #ccc', paddingTop: '5px'}}>Payment Mode: <b>{paymentMode.toUpperCase()}</b></div>
                     </div>
 
-                    <h4 style={{margin:'0 0 10px 0', color:'#ccc'}}>Payment Method:</h4>
+                    <h4 style={{margin:'0 0 10px 0', color: isDark ? '#ccc' : '#666'}}>Payment Method:</h4>
                     <div style={{display:'flex', gap:'15px', marginBottom:'15px'}}>
                         <button onClick={() => { setPaymentMode('Cash'); setShowQr(false); }} style={styles.pill(paymentMode === 'Cash')}>💵 CASH</button>
                         <button onClick={() => { setPaymentMode('Online'); setShowQr(true); }} style={styles.pill(paymentMode === 'Online')}>📱 ONLINE (QR)</button>
                     </div>
 
                     {showQr && (
-                        <div style={{textAlign:'center', marginBottom:'15px', background:'#fff', padding:'10px', borderRadius:'8px'}}>
+                        <div style={{textAlign:'center', marginBottom:'15px', background:'#fff', padding:'10px', borderRadius:'8px', border:'1px solid #ccc'}}>
+                            {/* Updated QR Code */}
                             <img src="https://files.catbox.moe/jedcoz.png" alt="Pay QR" style={{width:'200px', height:'200px'}} />
                             <div style={{color:'black', fontWeight:'bold', marginTop:'5px'}}>Scan to Pay</div>
                         </div>
                     )}
 
                     <button onClick={handleBillSubmit} style={styles.btn}>✅ SAVE & DOWNLOAD</button>
-                    <button onClick={shareOnWhatsApp} style={{...styles.btn, background:'#25D366', color:'#fff', marginTop:'10px'}}>💬 SEND (WhatsApp)</button>
+                    <button onClick={shareOnWhatsApp} style={{...styles.btn, background:'#25D366', marginTop:'10px'}}>💬 SEND (WhatsApp)</button>
                 </div>
             )}
         </>
@@ -286,14 +325,14 @@ export default function PlantPos() {
         <div style={{padding:'20px'}}>
             <h2>Sales History</h2>
             {orders.map(order => (
-                <div key={order._id} style={{background:'#1a1a1a', padding:'15px', marginBottom:'10px', borderRadius:'8px', borderLeft:`4px solid ${order.paymentMode === 'Online' ? '#00e676' : '#ffea00'}`}}>
+                <div key={order._id} style={{background: isDark ? '#1a1a1a' : '#fff', padding:'15px', marginBottom:'10px', borderRadius:'8px', borderLeft:`4px solid ${order.paymentMode === 'Online' ? '#00e676' : '#ffea00'}`, boxShadow: styles.card.boxShadow}}>
                     <div style={{display:'flex', justifyContent:'space-between', fontWeight:'bold', fontSize:'18px'}}>
                         <span>{order.shopName}</span>
                         <span style={{color:'#4caf50'}}>₹{order.totalAmount}</span>
                     </div>
-                    <div style={{fontSize:'12px', color:'#ccc', marginTop:'5px', display:'flex', justifyContent:'space-between'}}>
+                    <div style={{fontSize:'12px', color:'#888', marginTop:'5px', display:'flex', justifyContent:'space-between'}}>
                         <span>{new Date(order.date).toLocaleString()}</span>
-                        <span style={{fontWeight:'bold', color: order.paymentMode === 'Online' ? '#00e676' : '#ffea00'}}>{order.paymentMode}</span>
+                        <span style={{fontWeight:'bold', color: order.paymentMode === 'Online' ? '#00e676' : '#e6b800'}}>{order.paymentMode}</span>
                     </div>
                 </div>
             ))}
@@ -304,29 +343,29 @@ export default function PlantPos() {
       {activeTab === 'admin' && (
         <div style={{padding:'20px'}}>
             
-            {/* 1. MONEY REPORT */}
-            <div style={{background:'#111', padding:'15px', borderRadius:'8px', border:'1px solid #333', marginBottom:'20px'}}>
+            {/* COLLECTION REPORT */}
+            <div style={{background: isDark ? '#111' : '#fff', padding:'15px', borderRadius:'8px', border: styles.header.borderBottom, marginBottom:'20px'}}>
                 <h3 style={{marginTop:0, color:'#4caf50'}}>💰 COLLECTION REPORT</h3>
                 <div style={{display:'flex', justifyContent:'space-between', marginBottom:'10px'}}>
                     <span>💵 MERE PAAS (Cash):</span>
-                    <span style={{color:'#ffea00', fontWeight:'bold', fontSize:'18px'}}>₹{collection.cash}</span>
+                    <span style={{color: isDark ? '#ffea00' : '#d4a000', fontWeight:'bold', fontSize:'18px'}}>₹{collection.cash}</span>
                 </div>
                 <div style={{display:'flex', justifyContent:'space-between', marginBottom:'10px'}}>
                     <span>📱 ONLINE (Bank):</span>
                     <span style={{color:'#00e676', fontWeight:'bold', fontSize:'18px'}}>₹{collection.online}</span>
                 </div>
-                <div style={{borderTop:'1px solid #444', paddingTop:'10px', display:'flex', justifyContent:'space-between'}}>
+                <div style={{borderTop:`1px solid ${isDark ? '#444' : '#ddd'}`, paddingTop:'10px', display:'flex', justifyContent:'space-between'}}>
                     <span>TOTAL SELL:</span>
-                    <span style={{color:'#fff', fontWeight:'bold', fontSize:'18px'}}>₹{collection.total}</span>
+                    <span style={{fontWeight:'bold', fontSize:'18px'}}>₹{collection.total}</span>
                 </div>
             </div>
 
-            {/* 2. STOCK REPORT */}
-            <div style={{background:'#111', padding:'15px', borderRadius:'8px', border:'1px solid #333', marginBottom:'30px'}}>
+            {/* STOCK REPORT */}
+            <div style={{background: isDark ? '#111' : '#fff', padding:'15px', borderRadius:'8px', border: styles.header.borderBottom, marginBottom:'30px'}}>
                 <h3 style={{marginTop:0, color:'#4caf50'}}>🚚 STOCK REPORT</h3>
                 <table style={{width:'100%', fontSize:'12px', textAlign:'left'}}>
                     <thead>
-                        <tr style={{color:'#888', borderBottom:'1px solid #333'}}>
+                        <tr style={{color:'#888', borderBottom: styles.header.borderBottom}}>
                             <th style={{paddingBottom:'10px'}}>ITEM</th>
                             <th>SOLD</th>
                             <th>BAL</th>
@@ -334,7 +373,7 @@ export default function PlantPos() {
                     </thead>
                     <tbody>
                         {getDayReport().map((r, i) => (
-                            <tr key={i} style={{borderBottom:'1px solid #222'}}>
+                            <tr key={i} style={{borderBottom: `1px solid ${isDark ? '#222' : '#eee'}`}}>
                                 <td style={{padding:'8px 0'}}>{r.name}</td>
                                 <td style={{color:'#ff3d00', fontWeight:'bold'}}>{r.sold}</td>
                                 <td style={{color:'#4caf50', fontWeight:'bold'}}>{r.current}</td>
@@ -351,32 +390,8 @@ export default function PlantPos() {
             
             {/* PHOTO UPLOAD */}
             <div style={{marginBottom:'10px'}}>
-                <label style={{display:'block', marginBottom:'5px', color:'#ccc', fontSize:'12px'}}>Item Photo (Optional)</label>
-                <input type="file" accept="image/*" onChange={handleImageUpload} style={{color:'#fff'}} />
+                <label style={{display:'block', marginBottom:'5px', color:'#888', fontSize:'12px'}}>Item Photo (Optional)</label>
+                <input type="file" accept="image/*" onChange={handleImageUpload} style={{color: isDark ? '#fff' : '#000'}} />
             </div>
 
-            <button onClick={addProduct} style={styles.btn}>ADD ITEM</button>
-
-             <h3 style={{marginTop:'30px'}}>Stock List</h3>
-            {products.map(p => (
-                <div key={p._id} style={{display:'flex', alignItems:'center', justifyContent:'space-between', borderBottom:'1px solid #333', padding:'10px'}}>
-                    <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-                        {p.image && <img src={p.image} style={{width:'40px', height:'40px', borderRadius:'4px', objectFit:'cover'}} />}
-                        <span>{p.name} ({p.stock})</span>
-                    </div>
-                    <button onClick={() => deleteProduct(p._id)} style={{color:'red', background:'none', border:'none'}}>Del</button>
-                </div>
-            ))}
-        </div>
-      )}
-
-      {/* NAVIGATION */}
-      <div style={styles.nav}>
-        <button style={styles.navBtn(activeTab === 'billing')} onClick={() => setActiveTab('billing')}><span>🛒</span>BILLING</button>
-        <button style={styles.navBtn(activeTab === 'history')} onClick={() => setActiveTab('history')}><span>📄</span>HISTORY</button>
-        <button style={styles.navBtn(activeTab === 'admin')} onClick={() => setActiveTab('admin')}><span>⚙️</span>ADMIN</button>
-      </div>
-    </div>
-  );
-                              }
-                              
+            <button o
