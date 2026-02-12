@@ -1,25 +1,17 @@
-import dbConnect from '../../lib/mongoose';
-import Order from '../../models/Order';
+import mongoose from 'mongoose';
 
-export default async function handler(req, res) {
-  await dbConnect();
+const OrderSchema = new mongoose.Schema({
+  shopName: { type: String, required: true },
+  items: [
+    {
+      name: String,
+      qty: Number,
+      price: Number
+    }
+  ],
+  totalAmount: Number,
+  paymentMode: { type: String, default: 'Cash' }, // New Field: Cash or Online
+  date: { type: Date, default: Date.now }
+});
 
-  if (req.method === 'POST') {
-    // Naya Bill Save Karo
-    try {
-      const order = await Order.create(req.body);
-      res.status(201).json({ success: true, data: order });
-    } catch (error) {
-      res.status(400).json({ success: false });
-    }
-  } 
-  else if (req.method === 'GET') {
-    // Purani History Laao (Latest pehle)
-    try {
-      const orders = await Order.find({}).sort({ date: -1 });
-      res.status(200).json({ success: true, data: orders });
-    } catch (error) {
-      res.status(400).json({ success: false });
-    }
-  }
-}
+export default mongoose.models.Order || mongoose.model('Order', OrderSchema);
