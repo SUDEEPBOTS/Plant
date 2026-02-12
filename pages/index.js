@@ -3,9 +3,12 @@ import Head from 'next/head';
 
 export default function PlantPos() {
   const [activeTab, setActiveTab] = useState('billing');
+  
+  // Data States
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [cart, setCart] = useState([]);
+  const [loadingData, setLoadingData] = useState(true); // For Skeleton
   
   // UI States
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -15,23 +18,24 @@ export default function PlantPos() {
   // Billing Details
   const [shopName, setShopName] = useState('');
   const [shopNumber, setShopNumber] = useState('');
-
-  // Payment
   const [paymentMode, setPaymentMode] = useState('Cash'); 
   const [showQr, setShowQr] = useState(false);
 
-  // Admin Form
+  // Admin Security & Forms
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
   const [newItem, setNewItem] = useState({ name: '', price: '', pricePerBottle: '', stock: '', image: '' });
+  const [isEditing, setIsEditing] = useState(null); // ID of item being edited
 
+  // Initial Load
   useEffect(() => { 
-    fetchProducts();
-    fetchOrders();
+    loadAllData();
   }, []);
 
-  // --- TOAST NOTIFICATION ---
-  const showToast = (msg, type = 'success') => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
+  const loadAllData = async () => {
+    setLoadingData(true);
+    await Promise.all([fetchProducts(), fetchOrders()]);
+    setLoadingData(false);
   };
 
   // --- API CALLS ---
@@ -40,41 +44,46 @@ export default function PlantPos() {
         const res = await fetch('/api/products');
         const data = await res.json();
         if(data.success) setProducts(data.data);
-    } catch(e) { console.error("Err"); }
+    } catch(e) { console.error("Err Prod"); }
   };
 
   const fetchOrders = async () => {
     try {
         const res = await fetch('/api/orders');
         const data = await res.json();
-        if(data.success) setOrders(data.data);
-    } catch(e) { console.error("Err"); }
+        if(data.success) setOrders(data.data.reverse()); // Show latest first
+    } catch(e) { console.error("Err Order"); }
   };
 
-  // --- IMAGE UPLOAD ---
-  const handleImageUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-        const res = await fetch('https://telegra.ph/upload', { method: 'POST', body: formData });
-        const data = await res.json();
-        if (data && data[0] && data[0].src) {
-            setNewItem({ ...newItem, image: 'https://telegra.ph' + data[0].src });
-            showToast("Photo Uploaded! ✅");
-        }
-    } catch (error) { showToast("Upload Failed ❌", "error"); }
+  // --- TOAST ---
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
   };
 
-  // --- CART ACTIONS ---
+  // --- ADMIN AUTH ---
+  const unlockAdmin = () => {
+      if(adminPassword === 'rwf123') {
+          setIsAdminUnlocked(true);
+          setAdminPassword('');
+      } else {
+          showToast("Wrong Password! ❌", "error");
+      }
+  };
+
+  // --- CART LOGIC ---
   const addToCart = (p) => {
     if (navigator.vibrate) navigator.vibrate(50);
-    // Stock check removed temporarily to prevent blocking sales
     
+    // Check Actual Stock availability
+    const currentInCart = cart.find(i => i._id === p._id)?.qty || 0;
+    if (currentInCart >= p.stock) { 
+        showToast("Stock Not Available! ❌", "error"); 
+        return; 
+    }
+
     const exist = cart.find(i => i._id === p._id);
     setCart(exist ? cart.map(i => i._id === p._id ? { ...i, qty: i.qty + 1 } : i) : [...cart, { ...p, qty: 1 }]);
-    showToast(`${p.name} Added!`);
   };
 
   const decreaseQty = (id) => {
@@ -86,86 +95,106 @@ export default function PlantPos() {
 
   const calculateTotal = () => cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
 
-  // --- BILL SUBMIT (FIXED LOADER ISSUE) ---
+  // --- BILL SUBMIT ---
   const handleBillSubmit = async () => {
-    if(cart.length === 0 || !shopName) { showToast("Dukan Name daal bhai!", "error"); return; }
+    if(cart.length === 0 || !shopName) { showToast("Shop Name Required!", "error"); return; }
     
-    setIsSubmitting(true); // Loader Start
+    setIsSubmitting(true);
 
     const total = calculateTotal();
-    const billDetails = { shopName, items: cart, totalAmount: total, paymentMode };
+    const billDetails = { shopName, items: cart, totalAmount: total, paymentMode, date: new Date() };
 
+    // Update Local State immediately for speed
+    const tempCart = [...cart];
+    setCart([]); 
+    setShopName(''); 
+    setShopNumber('');
+    setIsSubmitting(false); // Stop loading immediately so user isn't stuck
+
+    // WhatsApp Redirect
+    let msg = `*🧾 NEW INVOICE*\n🏪 *${shopName}* (${shopNumber || 'No Num'})\n\n`;
+    tempCart.forEach(i => msg += `${i.qty} x ${i.name} = ₹${i.price * i.qty}\n`);
+    msg += `\n*💰 TOTAL: ₹${total}*\nMode: ${paymentMode}\nDate: ${new Date().toLocaleDateString()}`;
+    window.open(`https://wa.me/917303847666?text=${encodeURIComponent(msg)}`, '_blank');
+
+    // Background Sync
     try {
-        // WhatsApp Message Prepare
-        let msg = `*🧾 NEW BILL*\n`;
-        msg += `🏪 *${shopName}* (${shopNumber || 'No Num'})\n\n`;
-        cart.forEach(i => msg += `${i.qty} x ${i.name} = ₹${i.price * i.qty}\n`);
-        msg += `\n*💰 TOTAL: ₹${total}*\nMode: ${paymentMode}\nDate: ${new Date().toLocaleDateString()}`;
-        
-        // Open WhatsApp IMMEDIATELY (Don't wait for DB if net is slow)
-        window.open(`https://wa.me/917412896405?text=${encodeURIComponent(msg)}`, '_blank');
-
-        // Background Database Save
         await fetch('/api/orders', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(billDetails) });
-        await fetch('/api/products', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ items: cart }) });
-
-        // Reset UI
-        setCart([]); setShopName(''); setShopNumber(''); setPaymentMode('Cash'); setShowQr(false);
-        fetchProducts(); fetchOrders();
-        showToast("Bill Saved! ✅");
-
+        await fetch('/api/products', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ items: tempCart }) });
+        loadAllData(); // Refresh Data
+        showToast("Bill Saved ✅");
     } catch(e) {
-        showToast("Bill Sent (Offline) ⚠️", "success");
-    } finally {
-        setIsSubmitting(false); // Loader Stop Always
+        showToast("Saved Locally (Offline) ⚠️", "success");
     }
   };
 
   // --- ADMIN ACTIONS ---
-  const addProduct = async () => {
-    if(!newItem.name || !newItem.price) return showToast("Naam/Price Missing ❌", "error");
-    await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newItem) });
+  const handleImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+        const res = await fetch('https://telegra.ph/upload', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data && data[0]) setNewItem({ ...newItem, image: 'https://telegra.ph' + data[0].src });
+    } catch (error) { showToast("Image Upload Failed", "error"); }
+  };
+
+  const handleSaveItem = async () => {
+    if(!newItem.name || !newItem.price) return showToast("Name & Price Required", "error");
+    
+    if(isEditing) {
+        // UPDATE ITEM
+        await fetch('/api/products', { 
+            method: 'PUT', headers: {'Content-Type':'application/json'}, 
+            body: JSON.stringify({ id: isEditing, ...newItem }) 
+        });
+        showToast("Item Updated! ✅");
+        setIsEditing(null);
+    } else {
+        // ADD NEW ITEM
+        await fetch('/api/products', { 
+            method: 'POST', headers: {'Content-Type':'application/json'}, 
+            body: JSON.stringify(newItem) 
+        });
+        showToast("Item Added! ✅");
+    }
+    
     setNewItem({ name: '', price: '', pricePerBottle: '', stock: '', image: '' });
     fetchProducts();
-    showToast("Item Added! ✅");
   };
 
-  const deleteProduct = async (id) => { if(confirm("Delete?")) { await fetch(`/api/products?id=${id}`, { method: 'DELETE' }); fetchProducts(); } };
-  
-  const handleFactoryReset = async () => {
-    if(confirm("⚠️ SAB DELETE HO JAYEGA!") && prompt("Type 'DELETE'") === 'DELETE') {
-        await fetch('/api/reset', { method: 'DELETE' });
-        setProducts([]); setOrders([]); setCart([]);
-    }
+  const editItem = (p) => {
+      setNewItem({ name: p.name, price: p.price, pricePerBottle: p.pricePerBottle, stock: p.stock, image: p.image });
+      setIsEditing(p._id);
+      window.scrollTo(0,0);
   };
 
+  const deleteProduct = async (id) => { 
+      if(confirm("Delete this item?")) { 
+          await fetch(`/api/products?id=${id}`, { method: 'DELETE' }); 
+          fetchProducts(); 
+      } 
+  };
+
+  // --- RENDER HELPERS ---
   const filteredProducts = products.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
-  const totalStockValue = products.reduce((acc, p) => acc + (p.price * p.stock), 0);
-  const getCollectionReport = () => {
-    let c = 0, o = 0;
-    orders.forEach(ord => ord.paymentMode === 'Online' ? o += ord.totalAmount : c += ord.totalAmount);
-    return { cash: c, online: o, total: c + o };
-  };
-  const getDayReport = () => products.map(p => {
-    const sold = orders.reduce((acc, o) => acc + (o.items.find(i => i.name === p.name)?.qty || 0), 0);
-    return { name: p.name, current: p.stock, sold: sold, loaded: p.stock + sold };
-  });
 
-  // --- STYLES ---
+  // Styles
   const styles = {
-    container: { background: '#f4f6f8', color: '#000', minHeight: '100vh', paddingBottom: '0', fontFamily: 'sans-serif' },
+    container: { background: '#f4f6f8', color: '#000', minHeight: '100vh', paddingBottom: '120px', fontFamily: 'sans-serif' },
     header: { padding: '15px', background: '#fff', borderBottom: '1px solid #ddd', textAlign: 'center', color: '#2e7d32', fontSize: '20px', fontWeight: '800', position:'sticky', top:0, zIndex:50, boxShadow:'0 2px 5px rgba(0,0,0,0.05)' },
     input: { width: '100%', padding: '12px', background: '#fff', border: '1px solid #ccc', borderRadius: '8px', marginBottom: '10px', boxSizing: 'border-box' },
     btn: { width: '100%', padding: '14px', background: '#2e7d32', border: 'none', borderRadius: '8px', color: '#fff', fontWeight: 'bold', marginTop: '10px', fontSize:'16px' },
-    card: { background: '#fff', borderRadius: '12px', padding: '10px', border: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' },
-    cardLow: { border: '2px solid #ff5252' },
-    addBtn: { background: '#2e7d32', color: 'white', border: 'none', padding: '10px', width: '100%', borderRadius: '6px', fontWeight: 'bold', marginTop: '10px' },
+    card: { background: '#fff', borderRadius: '12px', padding: '10px', border: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', position:'relative' },
+    addBtn: (disabled) => ({ background: disabled ? '#ccc' : '#2e7d32', color: 'white', border: 'none', padding: '8px', width: '100%', borderRadius: '6px', fontWeight: 'bold', marginTop: '10px', cursor: disabled ? 'not-allowed' : 'pointer' }),
     nav: { position: 'fixed', bottom: 0, left: 0, width: '100%', background: '#fff', display: 'flex', borderTop: '1px solid #ddd', zIndex: 100, paddingBottom: '10px', paddingTop: '10px', boxShadow: '0 -2px 10px rgba(0,0,0,0.05)' },
     navBtn: (active) => ({ flex: 1, padding: '5px', background: 'none', border: 'none', color: active ? '#2e7d32' : '#888', fontWeight: 'bold', fontSize: '12px', display:'flex', flexDirection:'column', alignItems:'center' }),
-    pill: (active) => ({ padding: '8px 20px', borderRadius: '20px', border: '1px solid #2e7d32', background: active ? '#2e7d32' : 'transparent', color: active ? '#fff' : '#000', fontWeight: 'bold' }),
-    notAvailable: { color: '#ff5252', background:'#ffebee', padding:'2px 6px', borderRadius:'4px', fontSize:'10px', fontWeight:'bold' },
-    loader: { position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'rgba(0,0,0,0.8)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:9999, flexDirection:'column' },
-    toast: { position: 'fixed', bottom: '90px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '12px 24px', borderRadius: '30px', boxShadow: '0 4px 10px rgba(0,0,0,0.3)', zIndex: 1000, fontWeight: 'bold', animation: 'fadeIn 0.3s', whiteSpace: 'nowrap' }
+    skeleton: { background: '#e0e0e0', height: '100px', borderRadius: '8px', width: '100%', animation: 'pulse 1.5s infinite' },
+    loader: { position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'rgba(0,0,0,0.7)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:9999, flexDirection:'column' },
+    blurOverlay: { position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'rgba(255,255,255,0.8)', backdropFilter:'blur(5px)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:200 },
+    loginBox: { background:'white', padding:'25px', borderRadius:'15px', boxShadow:'0 10px 25px rgba(0,0,0,0.2)', width:'80%', textAlign:'center' }
   };
 
   return (
@@ -174,20 +203,16 @@ export default function PlantPos() {
         <title>PLANT POS</title>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
         <meta name="google" content="notranslate" />
-        <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+        <style>{`@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } } @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
       </Head>
 
-      {isSubmitting && (
-        <div style={styles.loader}>
-            <div style={{width:'50px', height:'50px', border:'5px solid #fff', borderTop:'5px solid #2e7d32', borderRadius:'50%', animation:'spin 1s linear infinite'}}></div>
-            <p style={{color:'white', marginTop:'15px', fontWeight:'bold'}}>Processing...</p>
-        </div>
-      )}
+      {isSubmitting && <div style={styles.loader}><div style={{width:'50px', height:'50px', border:'5px solid #fff', borderTop:'5px solid #2e7d32', borderRadius:'50%', animation:'spin 1s linear infinite'}}></div></div>}
       
-      {toast && <div style={styles.toast}>{toast.msg}</div>}
+      {toast && <div style={{position:'fixed', bottom:'90px', left:'50%', transform:'translateX(-50%)', background:'#333', color:'#fff', padding:'10px 20px', borderRadius:'30px', zIndex:2000}}>{toast.msg}</div>}
 
       <div style={styles.header}>🌱 PLANT MANAGER</div>
 
+      {/* BILLING TAB */}
       {activeTab === 'billing' && (
         <>
           <div style={{padding:'15px', background: '#fff', borderBottom: '1px solid #eee'}}>
@@ -197,28 +222,37 @@ export default function PlantPos() {
           </div>
 
           <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px', padding:'15px'}}>
-            {filteredProducts.map(p => (
-              <div key={p._id} style={{...styles.card, ...(p.stock < 5 ? styles.cardLow : {})}}>
-                <div style={{height:'120px', width:'100%', background:'#fff', borderRadius:'8px', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center'}}>
-                    {p.image ? <img src={p.image} style={{width:'100%', height:'100%', objectFit:'contain'}} /> : <span style={{color:'#ccc', fontSize:'12px'}}>No Photo</span>}
-                </div>
-                <div style={{marginTop:'8px'}}>
-                    <div style={{fontWeight:'bold', fontSize:'15px'}}>{p.name}</div>
-                    <div style={{color:'#000', fontSize:'13px'}}>Petti: <b>₹{p.price}</b></div>
-                    <div style={{fontSize:'12px', marginTop:'2px'}}>
-                        Bottle: {p.pricePerBottle > 0 ? <span style={{color:'#2e7d32', fontWeight:'bold'}}>₹{p.pricePerBottle}</span> : <span style={styles.notAvailable}>Not Available</span>}
-                    </div>
-                    <div style={{fontSize:'11px', color: p.stock < 5 ? 'red' : '#666', marginTop:'4px'}}>
-                        {p.stock < 5 ? `Low Stock: ${p.stock}` : `Stock: ${p.stock}`}
-                    </div>
-                </div>
-                <button onClick={() => addToCart(p)} style={styles.addBtn}>ADD +</button>
-              </div>
-            ))}
+            {loadingData ? (
+                // SKELETON LOADING
+                Array(4).fill(0).map((_, i) => <div key={i} style={styles.card}><div style={styles.skeleton}></div><div style={{...styles.skeleton, height:'20px', marginTop:'10px'}}></div></div>)
+            ) : filteredProducts.length === 0 ? (
+                <div style={{gridColumn:'span 2', textAlign:'center', color:'#888', padding:'20px'}}>No Items Found 🪴</div>
+            ) : (
+                filteredProducts.map(p => {
+                    const inCart = cart.find(i => i._id === p._id)?.qty || 0;
+                    const available = p.stock - inCart;
+                    return (
+                        <div key={p._id} style={{...styles.card, border: available === 0 ? '2px solid red' : '1px solid #e0e0e0'}}>
+                            <div style={{height:'100px', width:'100%', background:'#f5f5f5', borderRadius:'8px', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center'}}>
+                                {p.image ? <img src={p.image} style={{width:'100%', height:'100%', objectFit:'contain'}} /> : <span style={{color:'#ccc'}}>No Img</span>}
+                            </div>
+                            <div style={{marginTop:'8px'}}>
+                                <div style={{fontWeight:'bold', fontSize:'15px'}}>{p.name}</div>
+                                <div style={{fontSize:'13px'}}>Petti: <b>₹{p.price}</b></div>
+                                <div style={{fontSize:'12px', color: available < 5 ? 'red' : '#2e7d32', fontWeight:'bold'}}>
+                                    {available <= 0 ? 'Out of Stock' : `Available: ${available}`}
+                                </div>
+                            </div>
+                            <button onClick={() => addToCart(p)} disabled={available <= 0} style={styles.addBtn(available <= 0)}>
+                                {available <= 0 ? 'NO STOCK' : 'ADD +'}
+                            </button>
+                        </div>
+                    );
+                })
+            )}
           </div>
           
-          {/* HUGE SPACER TO FIX HIDDEN ITEMS */}
-          <div style={{height:'400px'}}></div>
+          <div style={{height:'350px'}}></div>
 
           {cart.length > 0 && (
             <div style={{padding:'15px', background: '#fff', borderTop: '2px solid #2e7d32', position:'fixed', bottom:'60px', left:0, width:'100%', boxSizing:'border-box', boxShadow:'0 -5px 15px rgba(0,0,0,0.1)', zIndex: 90}}>
@@ -227,7 +261,7 @@ export default function PlantPos() {
                       <tbody>{cart.map((item, i) => (
                           <tr key={i} style={{borderBottom:'1px solid #eee'}}>
                               <td style={{padding:'5px'}}>{item.name}</td>
-                              <td style={{padding:'5px', fontWeight:'bold'}}>x{item.qty}</td>
+                              <td style={{padding:'5px'}}>x{item.qty}</td>
                               <td style={{padding:'5px', textAlign:'right'}}>₹{item.price * item.qty}</td>
                               <td style={{width:'30px', textAlign:'right'}}>
                                   <button onClick={() => decreaseQty(item._id)} style={{background:'#ff5252', color:'white', border:'none', borderRadius:'50%', width:'24px', height:'24px', fontWeight:'bold', cursor:'pointer'}}>-</button>
@@ -239,8 +273,8 @@ export default function PlantPos() {
               <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', borderTop:'1px solid #ccc', paddingTop:'10px', marginBottom:'10px'}}>
                   <div style={{fontSize:'18px', fontWeight:'bold'}}>Total: ₹{calculateTotal()}</div>
                   <div style={{display:'flex', gap:'10px'}}>
-                    <button onClick={() => { setPaymentMode('Cash'); setShowQr(false); }} style={styles.pill(paymentMode === 'Cash')}>💵</button>
-                    <button onClick={() => { setPaymentMode('Online'); setShowQr(true); }} style={styles.pill(paymentMode === 'Online')}>📱</button>
+                    <button onClick={() => { setPaymentMode('Cash'); setShowQr(false); }} style={{padding:'8px 15px', border:'1px solid #2e7d32', borderRadius:'20px', background: paymentMode==='Cash'?'#2e7d32':'transparent', color: paymentMode==='Cash'?'#fff':'#000'}}>💵</button>
+                    <button onClick={() => { setPaymentMode('Online'); setShowQr(true); }} style={{padding:'8px 15px', border:'1px solid #2e7d32', borderRadius:'20px', background: paymentMode==='Online'?'#2e7d32':'transparent', color: paymentMode==='Online'?'#fff':'#000'}}>📱</button>
                   </div>
               </div>
               {showQr && <div style={{textAlign:'center', marginBottom:'10px'}}><img src="https://files.catbox.moe/jedcoz.png" style={{width:'120px'}} /></div>}
@@ -250,10 +284,13 @@ export default function PlantPos() {
         </>
       )}
 
+      {/* HISTORY TAB */}
       {activeTab === 'history' && (
-        <div style={{padding:'20px', paddingBottom:'100px'}}>
-            <h2>📜 Orders</h2>
-            {orders.map(order => (
+        <div style={{padding:'20px'}}>
+            <h2>📜 Past Orders</h2>
+            {loadingData ? <div style={styles.skeleton}></div> : 
+             orders.length === 0 ? <p style={{textAlign:'center', color:'#888'}}>No orders yet.</p> :
+             orders.map(order => (
                 <div key={order._id} style={{background: '#fff', padding:'15px', marginBottom:'10px', borderRadius:'8px', borderLeft:`4px solid ${order.paymentMode === 'Online' ? '#00e676' : '#ffeb3b'}`, boxShadow:'0 2px 5px rgba(0,0,0,0.05)'}}>
                     <div style={{display:'flex', justifyContent:'space-between', fontWeight:'bold'}}>
                         <span>{order.shopName}</span>
@@ -265,52 +302,59 @@ export default function PlantPos() {
         </div>
       )}
 
+      {/* ADMIN TAB */}
       {activeTab === 'admin' && (
-        <div style={{padding:'20px', paddingBottom:'100px'}}>
-            <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
-                <h3 style={{marginTop:0, color:'#2e7d32'}}>💰 COLLECTION</h3>
-                <div style={{display:'flex', justifyContent:'space-between'}}><span>💵 Cash:</span><span style={{fontWeight:'bold'}}>₹{getCollectionReport().cash}</span></div>
-                <div style={{display:'flex', justifyContent:'space-between'}}><span>📱 Online:</span><span style={{fontWeight:'bold'}}>₹{getCollectionReport().online}</span></div>
-                <div style={{borderTop:`1px solid #eee`, paddingTop:'5px', marginTop:'5px', fontWeight:'bold', display:'flex', justifyContent:'space-between'}}><span>TOTAL:</span><span>₹{getCollectionReport().total}</span></div>
-            </div>
-
-            <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
-                <h3 style={{marginTop:0, color:'#2196f3'}}>🚚 STOCK REPORT</h3>
-                <table style={{width:'100%', fontSize:'12px', textAlign:'left'}}>
-                    <thead><tr style={{color:'#888'}}><th>ITEM</th><th>SOLD</th><th>BAL</th></tr></thead>
-                    <tbody>{getDayReport().map((r,i) => <tr key={i}><td>{r.name}</td><td style={{color:'#ff3d00'}}>{r.sold}</td><td style={{color:'#2e7d32', fontWeight:'bold'}}>{r.current}</td></tr>)}</tbody>
-                </table>
-            </div>
-
-            <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
-                <h3 style={{marginTop:0, color:'#2196f3'}}>📝 ADD ITEM</h3>
-                <input placeholder="Item Name" style={styles.input} value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} />
-                <div style={{display:'flex', gap:'10px'}}>
-                    <input type="number" placeholder="Petti Rate (Bill)" style={styles.input} value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} />
-                    <input type="number" placeholder="Bottle MRP" style={styles.input} value={newItem.pricePerBottle} onChange={e => setNewItem({...newItem, pricePerBottle: e.target.value})} />
-                </div>
-                <input type="number" placeholder="Stock Qty" style={styles.input} value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} />
-                <input type="file" accept="image/*" onChange={handleImageUpload} style={{marginBottom:'10px'}} />
-                <button onClick={addProduct} style={styles.btn}>SAVE ITEM</button>
-            </div>
-
-            <h3 style={{marginTop:'30px'}}>Stock Management</h3>
-            {products.map(p => (
-                <div key={p._id} style={{display:'flex', justifyContent:'space-between', borderBottom: '1px solid #eee', padding:'10px', background:'white'}}>
-                    <div>
-                        <div style={{fontWeight:'bold'}}>{p.name}</div>
-                        <div style={{fontSize:'12px', color:'#666'}}>Petti: ₹{p.price} | MRP: {p.pricePerBottle || 'N/A'}</div>
-                    </div>
-                    <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-                        <span style={{fontWeight:'bold'}}>Qty: {p.stock}</span>
-                        <button onClick={() => deleteProduct(p._id)} style={{color:'red', background:'none', border:'none', fontWeight:'bold'}}>X</button>
+        <div style={{padding:'20px'}}>
+            {!isAdminUnlocked ? (
+                <div style={styles.blurOverlay}>
+                    <div style={styles.loginBox}>
+                        <h3>🔒 Admin Panel</h3>
+                        <p>Enter Password to continue</p>
+                        <input type="password" style={styles.input} value={adminPassword} onChange={e => setAdminPassword(e.target.value)} />
+                        <button onClick={unlockAdmin} style={styles.btn}>UNLOCK</button>
                     </div>
                 </div>
-            ))}
-            <button onClick={handleFactoryReset} style={{...styles.btn, background:'#ff5252', marginTop:'30px'}}>⚠️ RESET ALL DATA</button>
+            ) : (
+                <>
+                    <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
+                        <h3 style={{marginTop:0, color:'#2196f3'}}>{isEditing ? '✏️ EDIT ITEM' : '📝 ADD NEW ITEM'}</h3>
+                        <input placeholder="Item Name" style={styles.input} value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} />
+                        <div style={{display:'flex', gap:'10px'}}>
+                            <input type="number" placeholder="Petti Rate" style={styles.input} value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} />
+                            <input type="number" placeholder="Bottle MRP" style={styles.input} value={newItem.pricePerBottle} onChange={e => setNewItem({...newItem, pricePerBottle: e.target.value})} />
+                        </div>
+                        <input type="number" placeholder="Stock Qty" style={styles.input} value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} />
+                        <input type="file" accept="image/*" onChange={handleImageUpload} style={{marginBottom:'10px'}} />
+                        
+                        {isEditing ? (
+                            <div style={{display:'flex', gap:'10px'}}>
+                                <button onClick={handleSaveItem} style={styles.btn}>UPDATE ITEM</button>
+                                <button onClick={() => { setIsEditing(null); setNewItem({ name: '', price: '', pricePerBottle: '', stock: '', image: '' }); }} style={{...styles.btn, background:'#888'}}>CANCEL</button>
+                            </div>
+                        ) : (
+                            <button onClick={handleSaveItem} style={styles.btn}>SAVE ITEM</button>
+                        )}
+                    </div>
+
+                    <h3 style={{marginTop:'30px'}}>Inventory</h3>
+                    {products.map(p => (
+                        <div key={p._id} style={{display:'flex', justifyContent:'space-between', borderBottom: '1px solid #eee', padding:'10px', background:'white'}}>
+                            <div>
+                                <div style={{fontWeight:'bold'}}>{p.name}</div>
+                                <div style={{fontSize:'12px', color:'#666'}}>Stock: {p.stock} | Price: ₹{p.price}</div>
+                            </div>
+                            <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+                                <button onClick={() => editItem(p)} style={{color:'#2196f3', border:'1px solid #2196f3', background:'none', padding:'2px 8px', borderRadius:'4px', fontSize:'12px', fontWeight:'bold'}}>EDIT</button>
+                                <button onClick={() => deleteProduct(p._id)} style={{color:'red', border:'none', background:'none', fontWeight:'bold'}}>X</button>
+                            </div>
+                        </div>
+                    ))}
+                </>
+            )}
         </div>
       )}
 
+      {/* NAVIGATION */}
       <div style={styles.nav}>
         {['billing', 'history', 'admin'].map(tab => (
             <button key={tab} style={styles.navBtn(activeTab === tab)} onClick={() => setActiveTab(tab)}>
