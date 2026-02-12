@@ -10,7 +10,7 @@ export default function PlantPos() {
   // UI States
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [toast, setToast] = useState(null); // New: Toast Notification
+  const [toast, setToast] = useState(null); // Toast Notification
 
   // Billing Details
   const [shopName, setShopName] = useState('');
@@ -31,7 +31,7 @@ export default function PlantPos() {
   // --- TOAST NOTIFICATION HANDLER ---
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000); // 3 sec baad gayab
+    setTimeout(() => setToast(null), 3000);
   };
 
   // --- API CALLS ---
@@ -75,8 +75,6 @@ export default function PlantPos() {
     if (p.stock <= 0) { showToast("Stock Khatam! ❌", "error"); return; }
     
     const exist = cart.find(i => i._id === p._id);
-    // Optional: Limit check remove kar diya taaki bill ban sake agar stock count galat ho
-    
     setCart(exist ? cart.map(i => i._id === p._id ? { ...i, qty: i.qty + 1 } : i) : [...cart, { ...p, qty: 1 }]);
     showToast(`${p.name} Added! 🛒`);
   };
@@ -140,24 +138,37 @@ export default function PlantPos() {
     }
   };
 
+  // --- CALCULATIONS & FILTERS (Moved outside JSX to fix Admin Crash) ---
   const filteredProducts = products.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
-  const totalStockValue = products.reduce((acc, p) => acc + (p.price * p.stock), 0);
+  const totalStockValue = products.reduce((acc, p) => acc + ((p.price || 0) * (p.stock || 0)), 0);
+
+  const getCollectionReport = () => {
+    let c = 0, o = 0;
+    orders.forEach(ord => ord.paymentMode === 'Online' ? o += ord.totalAmount : c += ord.totalAmount);
+    return { cash: c, online: o, total: c + o };
+  };
+
+  const getDayReport = () => products.map(p => {
+    const sold = orders.reduce((acc, o) => acc + (o.items.find(i => i.name === p.name)?.qty || 0), 0);
+    return { name: p.name, current: p.stock, sold: sold, loaded: p.stock + sold };
+  });
 
   // --- STYLES ---
   const styles = {
-    container: { background: '#f4f6f8', color: '#000', minHeight: '100vh', paddingBottom: '150px', fontFamily: 'sans-serif' }, // Increased padding bottom
+    // FIX 2: Increased paddingBottom significantly so buttons don't hide behind nav
+    container: { background: '#f4f6f8', color: '#000', minHeight: '100vh', paddingBottom: '180px', fontFamily: 'sans-serif', boxSizing: 'border-box' },
     header: { padding: '15px', background: '#fff', borderBottom: '1px solid #ddd', textAlign: 'center', color: '#2e7d32', fontSize: '20px', fontWeight: '800', position:'sticky', top:0, zIndex:50, boxShadow:'0 2px 5px rgba(0,0,0,0.05)' },
     input: { width: '100%', padding: '12px', background: '#fff', border: '1px solid #ccc', borderRadius: '8px', marginBottom: '10px', boxSizing: 'border-box' },
     btn: { width: '100%', padding: '14px', background: '#2e7d32', border: 'none', borderRadius: '8px', color: '#fff', fontWeight: 'bold', marginTop: '10px', fontSize: '16px' },
     card: { background: '#fff', borderRadius: '12px', padding: '10px', border: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' },
     cardLow: { border: '2px solid #ff5252' },
-    addBtn: { background: '#2e7d32', color: 'white', border: 'none', padding: '10px', width: '100%', borderRadius: '6px', fontWeight: 'bold', marginTop: '10px' },
-    nav: { position: 'fixed', bottom: 0, width: '100%', background: '#fff', display: 'flex', borderTop: '1px solid #ddd', zIndex: 100, paddingBottom: '10px', paddingTop: '10px' },
+    addBtn: { background: '#2e7d32', color: 'white', border: 'none', padding: '10px', width: '100%', borderRadius: '6px', fontWeight: 'bold', marginTop: '10px', cursor:'pointer' },
+    nav: { position: 'fixed', bottom: 0, left: 0, width: '100%', background: '#fff', display: 'flex', borderTop: '1px solid #ddd', zIndex: 100, paddingBottom: '10px', paddingTop: '10px', boxShadow: '0 -2px 10px rgba(0,0,0,0.05)' },
     navBtn: (active) => ({ flex: 1, padding: '5px', background: 'none', border: 'none', color: active ? '#2e7d32' : '#888', fontWeight: 'bold', fontSize: '12px', display:'flex', flexDirection:'column', alignItems:'center' }),
     pill: (active) => ({ padding: '8px 20px', borderRadius: '20px', border: '1px solid #2e7d32', background: active ? '#2e7d32' : 'transparent', color: active ? '#fff' : '#000', fontWeight: 'bold' }),
     notAvailable: { color: '#ff5252', background:'#ffebee', padding:'2px 6px', borderRadius:'4px', fontSize:'10px', fontWeight:'bold' },
     loader: { position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'rgba(255,255,255,0.8)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:999 },
-    toast: { position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '10px 20px', borderRadius: '30px', boxShadow: '0 4px 10px rgba(0,0,0,0.2)', zIndex: 1000, fontWeight: 'bold', animation: 'fadeIn 0.3s' }
+    toast: { position: 'fixed', bottom: '90px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '12px 24px', borderRadius: '30px', boxShadow: '0 4px 10px rgba(0,0,0,0.3)', zIndex: 1000, fontWeight: 'bold', animation: 'fadeIn 0.3s', whiteSpace: 'nowrap' }
   };
 
   return (
@@ -165,7 +176,6 @@ export default function PlantPos() {
       <Head>
         <title>PLANT POS</title>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-        {/* FIX FOR TRANSLATOR POPUP */}
         <meta name="google" content="notranslate" />
         <style>{`
           @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -175,7 +185,6 @@ export default function PlantPos() {
 
       {isSubmitting && <div style={styles.loader}><div style={{width:'40px', height:'40px', border:'4px solid #ddd', borderTop:'4px solid #2e7d32', borderRadius:'50%', animation:'spin 1s linear infinite'}}></div></div>}
       
-      {/* TOAST NOTIFICATION */}
       {toast && <div style={styles.toast}>{toast.msg}</div>}
 
       <div style={styles.header}>🌱 PLANT MANAGER</div>
@@ -191,7 +200,6 @@ export default function PlantPos() {
           <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px', padding:'15px'}}>
             {filteredProducts.map(p => (
               <div key={p._id} style={{...styles.card, ...(p.stock < 5 ? styles.cardLow : {})}}>
-                {/* Product Image: Contain fix */}
                 <div style={{height:'120px', width:'100%', background:'#fff', borderRadius:'8px', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center'}}>
                     {p.image ? <img src={p.image} style={{width:'100%', height:'100%', objectFit:'contain'}} /> : <span style={{color:'#ccc', fontSize:'12px'}}>No Photo</span>}
                 </div>
@@ -211,34 +219,6 @@ export default function PlantPos() {
               </div>
             ))}
           </div>
-
-          {cart.length > 0 && (
-            <div style={{padding:'15px', background: '#fff', borderTop: '2px solid #2e7d32', position:'fixed', bottom:'60px', width:'100%', boxSizing:'border-box', boxShadow:'0 -5px 15px rgba(0,0,0,0.1)'}}>
-              <div style={{maxHeight:'150px', overflowY:'auto', marginBottom:'10px'}}>
-                  <table style={{width:'100%', fontSize:'14px'}}>
-                      <tbody>{cart.map((item, i) => (
-                          <tr key={i} style={{borderBottom:'1px solid #eee'}}>
-                              <td style={{padding:'5px'}}>{item.name}</td>
-                              <td style={{padding:'5px', fontWeight:'bold'}}>x{item.qty}</td>
-                              <td style={{padding:'5px', textAlign:'right'}}>₹{item.price * item.qty}</td>
-                              <td style={{width:'30px', textAlign:'right'}}>
-                                  <button onClick={() => decreaseQty(item._id)} style={{background:'#ff5252', color:'white', border:'none', borderRadius:'50%', width:'24px', height:'24px', fontWeight:'bold'}}>-</button>
-                              </td>
-                          </tr>
-                      ))}</tbody>
-                  </table>
-              </div>
-              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', borderTop:'1px solid #ccc', paddingTop:'10px', marginBottom:'10px'}}>
-                  <div style={{fontSize:'18px', fontWeight:'bold'}}>Total: ₹{calculateTotal()}</div>
-                  <div style={{display:'flex', gap:'10px'}}>
-                    <button onClick={() => { setPaymentMode('Cash'); setShowQr(false); }} style={styles.pill(paymentMode === 'Cash')}>💵</button>
-                    <button onClick={() => { setPaymentMode('Online'); setShowQr(true); }} style={styles.pill(paymentMode === 'Online')}>📱</button>
-                  </div>
-              </div>
-              {showQr && <div style={{textAlign:'center', marginBottom:'10px'}}><img src="https://files.catbox.moe/jedcoz.png" style={{width:'120px'}} /></div>}
-              <button onClick={handleBillSubmit} style={styles.btn}>✅ SUBMIT ORDER</button>
-            </div>
-          )}
         </>
       )}
 
@@ -259,11 +239,26 @@ export default function PlantPos() {
 
       {activeTab === 'admin' && (
         <div style={{padding:'20px'}}>
+            {/* FIX 1: Variables used here are now defined outside JSX */}
             <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
                 <h3 style={{marginTop:0, color:'#2e7d32'}}>💰 COLLECTION</h3>
                 <div style={{display:'flex', justifyContent:'space-between'}}><span>💵 Cash:</span><span style={{fontWeight:'bold'}}>₹{getCollectionReport().cash}</span></div>
                 <div style={{display:'flex', justifyContent:'space-between'}}><span>📱 Online:</span><span style={{fontWeight:'bold'}}>₹{getCollectionReport().online}</span></div>
                 <div style={{borderTop:`1px solid #eee`, paddingTop:'5px', marginTop:'5px', fontWeight:'bold', display:'flex', justifyContent:'space-between'}}><span>TOTAL:</span><span>₹{getCollectionReport().total}</span></div>
+            </div>
+
+            <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
+                <h3 style={{marginTop:0, color:'#2e7d32'}}>📊 STOCK SUMMARY</h3>
+                <div style={{display:'flex', justifyContent:'space-between', marginBottom:'5px'}}><span>Total Value:</span><span style={{fontWeight:'bold'}}>₹{totalStockValue}</span></div>
+                <div style={{display:'flex', justifyContent:'space-between'}}><span>Total Items:</span><span style={{fontWeight:'bold'}}>{products.length}</span></div>
+            </div>
+
+            <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
+                <h3 style={{marginTop:0, color:'#2196f3'}}>🚚 STOCK REPORT</h3>
+                <table style={{width:'100%', fontSize:'12px', textAlign:'left'}}>
+                    <thead><tr style={{color:'#888'}}><th>ITEM</th><th>SOLD</th><th>BAL</th></tr></thead>
+                    <tbody>{getDayReport().map((r,i) => <tr key={i}><td>{r.name}</td><td style={{color:'#ff3d00'}}>{r.sold}</td><td style={{color:'#2e7d32', fontWeight:'bold'}}>{r.current}</td></tr>)}</tbody>
+                </table>
             </div>
 
             <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
@@ -295,6 +290,35 @@ export default function PlantPos() {
         </div>
       )}
 
+      {/* BILLING CART STICKY FOOTER (Only shows in billing tab) */}
+      {activeTab === 'billing' && cart.length > 0 && (
+        <div style={{padding:'15px', background: '#fff', borderTop: '2px solid #2e7d32', position:'fixed', bottom:'60px', left:0, width:'100%', boxSizing:'border-box', boxShadow:'0 -5px 15px rgba(0,0,0,0.1)', zIndex: 90}}>
+          <div style={{maxHeight:'150px', overflowY:'auto', marginBottom:'10px'}}>
+              <table style={{width:'100%', fontSize:'14px'}}>
+                  <tbody>{cart.map((item, i) => (
+                      <tr key={i} style={{borderBottom:'1px solid #eee'}}>
+                          <td style={{padding:'5px'}}>{item.name}</td>
+                          <td style={{padding:'5px', fontWeight:'bold'}}>x{item.qty}</td>
+                          <td style={{padding:'5px', textAlign:'right'}}>₹{item.price * item.qty}</td>
+                          <td style={{width:'30px', textAlign:'right'}}>
+                              <button onClick={() => decreaseQty(item._id)} style={{background:'#ff5252', color:'white', border:'none', borderRadius:'50%', width:'24px', height:'24px', fontWeight:'bold', cursor:'pointer'}}>-</button>
+                          </td>
+                      </tr>
+                  ))}</tbody>
+              </table>
+          </div>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', borderTop:'1px solid #ccc', paddingTop:'10px', marginBottom:'10px'}}>
+              <div style={{fontSize:'18px', fontWeight:'bold'}}>Total: ₹{calculateTotal()}</div>
+              <div style={{display:'flex', gap:'10px'}}>
+                <button onClick={() => { setPaymentMode('Cash'); setShowQr(false); }} style={styles.pill(paymentMode === 'Cash')}>💵</button>
+                <button onClick={() => { setPaymentMode('Online'); setShowQr(true); }} style={styles.pill(paymentMode === 'Online')}>📱</button>
+              </div>
+          </div>
+          {showQr && <div style={{textAlign:'center', marginBottom:'10px'}}><img src="https://files.catbox.moe/jedcoz.png" style={{width:'120px'}} /></div>}
+          <button onClick={handleBillSubmit} style={styles.btn}>✅ SUBMIT ORDER</button>
+        </div>
+      )}
+
       <div style={styles.nav}>
         {['billing', 'history', 'admin'].map(tab => (
             <button key={tab} style={styles.navBtn(activeTab === tab)} onClick={() => setActiveTab(tab)}>
@@ -305,5 +329,5 @@ export default function PlantPos() {
       </div>
     </div>
   );
-                                                                                                               }
-              
+                          }
+                          
