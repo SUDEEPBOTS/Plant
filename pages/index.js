@@ -12,6 +12,10 @@ export default function PlantPos() {
   const [searchQuery, setSearchQuery] = useState('');
   const [toast, setToast] = useState(null);
 
+  // Admin Security
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+  const [adminPassInput, setAdminPassInput] = useState('');
+
   // Billing Details
   const [shopName, setShopName] = useState('');
   const [shopNumber, setShopNumber] = useState('');
@@ -40,7 +44,7 @@ export default function PlantPos() {
         const res = await fetch('/api/products');
         const data = await res.json();
         if(data.success) setProducts(data.data);
-    } catch(e) { console.error("Err"); }
+    } catch(e) { console.error("Err fetching products"); }
   };
 
   const fetchOrders = async () => {
@@ -48,30 +52,31 @@ export default function PlantPos() {
         const res = await fetch('/api/orders');
         const data = await res.json();
         if(data.success) setOrders(data.data);
-    } catch(e) { console.error("Err"); }
+    } catch(e) { console.error("Err fetching orders"); }
   };
 
-  // --- IMAGE UPLOAD ---
-  const handleImageUpload = async (e) => {
+  // --- IMAGE UPLOAD (FIXED: Uses Base64 now) ---
+  const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-        const res = await fetch('https://telegra.ph/upload', { method: 'POST', body: formData });
-        const data = await res.json();
-        if (data && data[0] && data[0].src) {
-            setNewItem({ ...newItem, image: 'https://telegra.ph' + data[0].src });
-            showToast("Photo Uploaded! ✅");
-        }
-    } catch (error) { showToast("Upload Failed ❌", "error"); }
+
+    // File size check (Limit to 2MB to prevent DB crash)
+    if (file.size > 2 * 1024 * 1024) {
+        showToast("Photo too large! (Max 2MB) ❌", "error");
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+        setNewItem({ ...newItem, image: reader.result });
+        showToast("Photo Selected! ✅");
+    };
+    reader.readAsDataURL(file);
   };
 
   // --- CART ACTIONS ---
   const addToCart = (p) => {
     if (navigator.vibrate) navigator.vibrate(50);
-    // Stock check removed temporarily to prevent blocking sales
-    
     const exist = cart.find(i => i._id === p._id);
     setCart(exist ? cart.map(i => i._id === p._id ? { ...i, qty: i.qty + 1 } : i) : [...cart, { ...p, qty: 1 }]);
     showToast(`${p.name} Added!`);
@@ -86,30 +91,27 @@ export default function PlantPos() {
 
   const calculateTotal = () => cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
 
-  // --- BILL SUBMIT (FIXED LOADER ISSUE) ---
+  // --- BILL SUBMIT ---
   const handleBillSubmit = async () => {
     if(cart.length === 0 || !shopName) { showToast("Dukan Name daal bhai!", "error"); return; }
     
-    setIsSubmitting(true); // Loader Start
+    setIsSubmitting(true);
 
     const total = calculateTotal();
     const billDetails = { shopName, items: cart, totalAmount: total, paymentMode };
 
     try {
-        // WhatsApp Message Prepare
+        // WhatsApp Message
         let msg = `*🧾 NEW BILL*\n`;
         msg += `🏪 *${shopName}* (${shopNumber || 'No Num'})\n\n`;
         cart.forEach(i => msg += `${i.qty} x ${i.name} = ₹${i.price * i.qty}\n`);
         msg += `\n*💰 TOTAL: ₹${total}*\nMode: ${paymentMode}\nDate: ${new Date().toLocaleDateString()}`;
         
-        // Open WhatsApp IMMEDIATELY (Don't wait for DB if net is slow)
         window.open(`https://wa.me/917303847666?text=${encodeURIComponent(msg)}`, '_blank');
 
-        // Background Database Save
         await fetch('/api/orders', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(billDetails) });
         await fetch('/api/products', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ items: cart }) });
 
-        // Reset UI
         setCart([]); setShopName(''); setShopNumber(''); setPaymentMode('Cash'); setShowQr(false);
         fetchProducts(); fetchOrders();
         showToast("Bill Saved! ✅");
@@ -117,11 +119,21 @@ export default function PlantPos() {
     } catch(e) {
         showToast("Bill Sent (Offline) ⚠️", "success");
     } finally {
-        setIsSubmitting(false); // Loader Stop Always
+        setIsSubmitting(false);
     }
   };
 
   // --- ADMIN ACTIONS ---
+  const handleAdminLogin = () => {
+      if(adminPassInput === 'rwf123') {
+          setIsAdminLoggedIn(true);
+          showToast("Welcome Boss! 🔓");
+      } else {
+          showToast("Wrong Password ❌", "error");
+          setAdminPassInput('');
+      }
+  };
+
   const addProduct = async () => {
     if(!newItem.name || !newItem.price) return showToast("Naam/Price Missing ❌", "error");
     await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newItem) });
@@ -140,12 +152,13 @@ export default function PlantPos() {
   };
 
   const filteredProducts = products.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
-  const totalStockValue = products.reduce((acc, p) => acc + (p.price * p.stock), 0);
+  
   const getCollectionReport = () => {
     let c = 0, o = 0;
     orders.forEach(ord => ord.paymentMode === 'Online' ? o += ord.totalAmount : c += ord.totalAmount);
     return { cash: c, online: o, total: c + o };
   };
+  
   const getDayReport = () => products.map(p => {
     const sold = orders.reduce((acc, o) => acc + (o.items.find(i => i.name === p.name)?.qty || 0), 0);
     return { name: p.name, current: p.stock, sold: sold, loaded: p.stock + sold };
@@ -153,19 +166,20 @@ export default function PlantPos() {
 
   // --- STYLES ---
   const styles = {
-    container: { background: '#f4f6f8', color: '#000', minHeight: '100vh', paddingBottom: '0', fontFamily: 'sans-serif' },
+    container: { background: '#f4f6f8', color: '#000', minHeight: '100vh', fontFamily: 'sans-serif' },
     header: { padding: '15px', background: '#fff', borderBottom: '1px solid #ddd', textAlign: 'center', color: '#2e7d32', fontSize: '20px', fontWeight: '800', position:'sticky', top:0, zIndex:50, boxShadow:'0 2px 5px rgba(0,0,0,0.05)' },
     input: { width: '100%', padding: '12px', background: '#fff', border: '1px solid #ccc', borderRadius: '8px', marginBottom: '10px', boxSizing: 'border-box' },
-    btn: { width: '100%', padding: '14px', background: '#2e7d32', border: 'none', borderRadius: '8px', color: '#fff', fontWeight: 'bold', marginTop: '10px', fontSize:'16px' },
+    btn: { width: '100%', padding: '14px', background: '#2e7d32', border: 'none', borderRadius: '8px', color: '#fff', fontWeight: 'bold', marginTop: '10px', fontSize:'16px', cursor:'pointer' },
     card: { background: '#fff', borderRadius: '12px', padding: '10px', border: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' },
     cardLow: { border: '2px solid #ff5252' },
-    addBtn: { background: '#2e7d32', color: 'white', border: 'none', padding: '10px', width: '100%', borderRadius: '6px', fontWeight: 'bold', marginTop: '10px' },
+    addBtn: { background: '#2e7d32', color: 'white', border: 'none', padding: '10px', width: '100%', borderRadius: '6px', fontWeight: 'bold', marginTop: '10px', cursor:'pointer' },
     nav: { position: 'fixed', bottom: 0, left: 0, width: '100%', background: '#fff', display: 'flex', borderTop: '1px solid #ddd', zIndex: 100, paddingBottom: '10px', paddingTop: '10px', boxShadow: '0 -2px 10px rgba(0,0,0,0.05)' },
-    navBtn: (active) => ({ flex: 1, padding: '5px', background: 'none', border: 'none', color: active ? '#2e7d32' : '#888', fontWeight: 'bold', fontSize: '12px', display:'flex', flexDirection:'column', alignItems:'center' }),
-    pill: (active) => ({ padding: '8px 20px', borderRadius: '20px', border: '1px solid #2e7d32', background: active ? '#2e7d32' : 'transparent', color: active ? '#fff' : '#000', fontWeight: 'bold' }),
+    navBtn: (active) => ({ flex: 1, padding: '5px', background: 'none', border: 'none', color: active ? '#2e7d32' : '#888', fontWeight: 'bold', fontSize: '12px', display:'flex', flexDirection:'column', alignItems:'center', cursor:'pointer' }),
+    pill: (active) => ({ padding: '8px 20px', borderRadius: '20px', border: '1px solid #2e7d32', background: active ? '#2e7d32' : 'transparent', color: active ? '#fff' : '#000', fontWeight: 'bold', cursor:'pointer' }),
     notAvailable: { color: '#ff5252', background:'#ffebee', padding:'2px 6px', borderRadius:'4px', fontSize:'10px', fontWeight:'bold' },
     loader: { position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'rgba(0,0,0,0.8)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:9999, flexDirection:'column' },
-    toast: { position: 'fixed', bottom: '90px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '12px 24px', borderRadius: '30px', boxShadow: '0 4px 10px rgba(0,0,0,0.3)', zIndex: 1000, fontWeight: 'bold', animation: 'fadeIn 0.3s', whiteSpace: 'nowrap' }
+    toast: { position: 'fixed', bottom: '90px', left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '12px 24px', borderRadius: '30px', boxShadow: '0 4px 10px rgba(0,0,0,0.3)', zIndex: 1000, fontWeight: 'bold', animation: 'fadeIn 0.3s', whiteSpace: 'nowrap' },
+    loginBox: { maxWidth: '300px', margin: '50px auto', padding: '20px', background: '#fff', borderRadius: '10px', boxShadow: '0 4px 15px rgba(0,0,0,0.1)', textAlign: 'center' }
   };
 
   return (
@@ -196,11 +210,14 @@ export default function PlantPos() {
             <input style={{...styles.input, border:'1px solid #2196f3', marginBottom:0}} placeholder="🔍 Search Item..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
           </div>
 
-          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px', padding:'15px'}}>
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px', padding:'15px', paddingBottom:'250px'}}>
             {filteredProducts.map(p => (
               <div key={p._id} style={{...styles.card, ...(p.stock < 5 ? styles.cardLow : {})}}>
-                <div style={{height:'120px', width:'100%', background:'#fff', borderRadius:'8px', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center'}}>
-                    {p.image ? <img src={p.image} style={{width:'100%', height:'100%', objectFit:'contain'}} /> : <span style={{color:'#ccc', fontSize:'12px'}}>No Photo</span>}
+                <div style={{height:'120px', width:'100%', background:'#f9f9f9', borderRadius:'8px', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center'}}>
+                    {p.image ? 
+                        <img src={p.image} style={{width:'100%', height:'100%', objectFit:'contain'}} alt={p.name} /> 
+                        : <span style={{color:'#ccc', fontSize:'12px'}}>No Photo</span>
+                    }
                 </div>
                 <div style={{marginTop:'8px'}}>
                     <div style={{fontWeight:'bold', fontSize:'15px'}}>{p.name}</div>
@@ -216,9 +233,6 @@ export default function PlantPos() {
               </div>
             ))}
           </div>
-          
-          {/* HUGE SPACER TO FIX HIDDEN ITEMS */}
-          <div style={{height:'400px'}}></div>
 
           {cart.length > 0 && (
             <div style={{padding:'15px', background: '#fff', borderTop: '2px solid #2e7d32', position:'fixed', bottom:'60px', left:0, width:'100%', boxSizing:'border-box', boxShadow:'0 -5px 15px rgba(0,0,0,0.1)', zIndex: 90}}>
@@ -243,7 +257,7 @@ export default function PlantPos() {
                     <button onClick={() => { setPaymentMode('Online'); setShowQr(true); }} style={styles.pill(paymentMode === 'Online')}>📱</button>
                   </div>
               </div>
-              {showQr && <div style={{textAlign:'center', marginBottom:'10px'}}><img src="https://files.catbox.moe/jedcoz.png" style={{width:'120px'}} /></div>}
+              {showQr && <div style={{textAlign:'center', marginBottom:'10px'}}><img src="https://files.catbox.moe/jedcoz.png" style={{width:'120px'}} alt="QR Code" /></div>}
               <button onClick={handleBillSubmit} style={styles.btn}>✅ SUBMIT ORDER</button>
             </div>
           )}
@@ -253,7 +267,7 @@ export default function PlantPos() {
       {activeTab === 'history' && (
         <div style={{padding:'20px', paddingBottom:'100px'}}>
             <h2>📜 Orders</h2>
-            {orders.map(order => (
+            {orders.slice().reverse().map(order => (
                 <div key={order._id} style={{background: '#fff', padding:'15px', marginBottom:'10px', borderRadius:'8px', borderLeft:`4px solid ${order.paymentMode === 'Online' ? '#00e676' : '#ffeb3b'}`, boxShadow:'0 2px 5px rgba(0,0,0,0.05)'}}>
                     <div style={{display:'flex', justifyContent:'space-between', fontWeight:'bold'}}>
                         <span>{order.shopName}</span>
@@ -267,47 +281,72 @@ export default function PlantPos() {
 
       {activeTab === 'admin' && (
         <div style={{padding:'20px', paddingBottom:'100px'}}>
-            <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
-                <h3 style={{marginTop:0, color:'#2e7d32'}}>💰 COLLECTION</h3>
-                <div style={{display:'flex', justifyContent:'space-between'}}><span>💵 Cash:</span><span style={{fontWeight:'bold'}}>₹{getCollectionReport().cash}</span></div>
-                <div style={{display:'flex', justifyContent:'space-between'}}><span>📱 Online:</span><span style={{fontWeight:'bold'}}>₹{getCollectionReport().online}</span></div>
-                <div style={{borderTop:`1px solid #eee`, paddingTop:'5px', marginTop:'5px', fontWeight:'bold', display:'flex', justifyContent:'space-between'}}><span>TOTAL:</span><span>₹{getCollectionReport().total}</span></div>
-            </div>
-
-            <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
-                <h3 style={{marginTop:0, color:'#2196f3'}}>🚚 STOCK REPORT</h3>
-                <table style={{width:'100%', fontSize:'12px', textAlign:'left'}}>
-                    <thead><tr style={{color:'#888'}}><th>ITEM</th><th>SOLD</th><th>BAL</th></tr></thead>
-                    <tbody>{getDayReport().map((r,i) => <tr key={i}><td>{r.name}</td><td style={{color:'#ff3d00'}}>{r.sold}</td><td style={{color:'#2e7d32', fontWeight:'bold'}}>{r.current}</td></tr>)}</tbody>
-                </table>
-            </div>
-
-            <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
-                <h3 style={{marginTop:0, color:'#2196f3'}}>📝 ADD ITEM</h3>
-                <input placeholder="Item Name" style={styles.input} value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} />
-                <div style={{display:'flex', gap:'10px'}}>
-                    <input type="number" placeholder="Petti Rate (Bill)" style={styles.input} value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} />
-                    <input type="number" placeholder="Bottle MRP" style={styles.input} value={newItem.pricePerBottle} onChange={e => setNewItem({...newItem, pricePerBottle: e.target.value})} />
+            {/* PASSWORD PROTECTION */}
+            {!isAdminLoggedIn ? (
+                <div style={styles.loginBox}>
+                    <h3>🔒 ADMIN LOCKED</h3>
+                    <input 
+                        type="password" 
+                        placeholder="Enter Password" 
+                        style={styles.input} 
+                        value={adminPassInput} 
+                        onChange={(e) => setAdminPassInput(e.target.value)} 
+                    />
+                    <button onClick={handleAdminLogin} style={styles.btn}>UNLOCK</button>
                 </div>
-                <input type="number" placeholder="Stock Qty" style={styles.input} value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} />
-                <input type="file" accept="image/*" onChange={handleImageUpload} style={{marginBottom:'10px'}} />
-                <button onClick={addProduct} style={styles.btn}>SAVE ITEM</button>
-            </div>
+            ) : (
+                <>
+                    <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
+                        <h3 style={{marginTop:0, color:'#2e7d32'}}>💰 COLLECTION</h3>
+                        <div style={{display:'flex', justifyContent:'space-between'}}><span>💵 Cash:</span><span style={{fontWeight:'bold'}}>₹{getCollectionReport().cash}</span></div>
+                        <div style={{display:'flex', justifyContent:'space-between'}}><span>📱 Online:</span><span style={{fontWeight:'bold'}}>₹{getCollectionReport().online}</span></div>
+                        <div style={{borderTop:`1px solid #eee`, paddingTop:'5px', marginTop:'5px', fontWeight:'bold', display:'flex', justifyContent:'space-between'}}><span>TOTAL:</span><span>₹{getCollectionReport().total}</span></div>
+                    </div>
 
-            <h3 style={{marginTop:'30px'}}>Stock Management</h3>
-            {products.map(p => (
-                <div key={p._id} style={{display:'flex', justifyContent:'space-between', borderBottom: '1px solid #eee', padding:'10px', background:'white'}}>
-                    <div>
-                        <div style={{fontWeight:'bold'}}>{p.name}</div>
-                        <div style={{fontSize:'12px', color:'#666'}}>Petti: ₹{p.price} | MRP: {p.pricePerBottle || 'N/A'}</div>
+                    <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
+                        <h3 style={{marginTop:0, color:'#2196f3'}}>🚚 STOCK REPORT</h3>
+                        <table style={{width:'100%', fontSize:'12px', textAlign:'left'}}>
+                            <thead><tr style={{color:'#888'}}><th>ITEM</th><th>SOLD</th><th>BAL</th></tr></thead>
+                            <tbody>{getDayReport().map((r,i) => <tr key={i}><td>{r.name}</td><td style={{color:'#ff3d00'}}>{r.sold}</td><td style={{color:'#2e7d32', fontWeight:'bold'}}>{r.current}</td></tr>)}</tbody>
+                        </table>
                     </div>
-                    <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-                        <span style={{fontWeight:'bold'}}>Qty: {p.stock}</span>
-                        <button onClick={() => deleteProduct(p._id)} style={{color:'red', background:'none', border:'none', fontWeight:'bold'}}>X</button>
+
+                    <div style={{background: '#fff', padding:'15px', borderRadius:'8px', border: '1px solid #eee', marginBottom:'20px'}}>
+                        <h3 style={{marginTop:0, color:'#2196f3'}}>📝 ADD ITEM</h3>
+                        <input placeholder="Item Name" style={styles.input} value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} />
+                        <div style={{display:'flex', gap:'10px'}}>
+                            <input type="number" placeholder="Petti Rate (Bill)" style={styles.input} value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} />
+                            <input type="number" placeholder="Bottle MRP" style={styles.input} value={newItem.pricePerBottle} onChange={e => setNewItem({...newItem, pricePerBottle: e.target.value})} />
+                        </div>
+                        <input type="number" placeholder="Stock Qty" style={styles.input} value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} />
+                        
+                        <p style={{fontSize:'12px', fontWeight:'bold', marginBottom:'5px'}}>Item Photo:</p>
+                        <input type="file" accept="image/*" onChange={handleImageUpload} style={{marginBottom:'10px'}} />
+                        
+                        {newItem.image && <img src={newItem.image} alt="Preview" style={{width:'50px', height:'50px', objectFit:'cover', display:'block', marginBottom:'10px', borderRadius:'5px', border:'1px solid #ccc'}} />}
+                        
+                        <button onClick={addProduct} style={styles.btn}>SAVE ITEM</button>
                     </div>
-                </div>
-            ))}
-            <button onClick={handleFactoryReset} style={{...styles.btn, background:'#ff5252', marginTop:'30px'}}>⚠️ RESET ALL DATA</button>
+
+                    <h3 style={{marginTop:'30px'}}>Stock Management</h3>
+                    {products.map(p => (
+                        <div key={p._id} style={{display:'flex', justifyContent:'space-between', borderBottom: '1px solid #eee', padding:'10px', background:'white'}}>
+                            <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
+                                {p.image && <img src={p.image} style={{width:'40px', height:'40px', borderRadius:'4px', objectFit:'cover'}} />}
+                                <div>
+                                    <div style={{fontWeight:'bold'}}>{p.name}</div>
+                                    <div style={{fontSize:'12px', color:'#666'}}>Petti: ₹{p.price} | MRP: {p.pricePerBottle || 'N/A'}</div>
+                                </div>
+                            </div>
+                            <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+                                <span style={{fontWeight:'bold'}}>Qty: {p.stock}</span>
+                                <button onClick={() => deleteProduct(p._id)} style={{color:'red', background:'none', border:'none', fontWeight:'bold', fontSize:'18px'}}>X</button>
+                            </div>
+                        </div>
+                    ))}
+                    <button onClick={handleFactoryReset} style={{...styles.btn, background:'#ff5252', marginTop:'30px'}}>⚠️ RESET ALL DATA</button>
+                </>
+            )}
         </div>
       )}
 
@@ -321,4 +360,4 @@ export default function PlantPos() {
       </div>
     </div>
   );
-        }
+              }
